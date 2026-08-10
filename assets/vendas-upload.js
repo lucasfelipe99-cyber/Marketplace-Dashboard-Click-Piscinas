@@ -94,6 +94,38 @@
     return headers.findIndex(function (header) { return normalized(header) === key; });
   }
 
+  function normalizeTreatedHeaders(rows) {
+    if (!Array.isArray(rows) || !rows.length) return rows;
+    var aliases = {
+      'n.º de venda': ['id do pedido', 'número do pedido', 'order id', 'amazon-order-id'],
+      'data da venda': ['data completa', 'data do pedido', 'created time', 'purchase-date'],
+      'estado': ['status do pedido', 'order status', 'order-status', 'status pacote no momento que o relatório foi solicitado'],
+      'type.1': ['status'],
+      'forma de entrega': ['opção de envio', 'fulfillment type', 'fulfillment-channel', 'modalidade de entrega'],
+      '# de anuncio': ['id do produto', 'sku id', 'asin', 'codigo sku seller'],
+      'titulo do anuncio': ['nome do produto', 'product name', 'product-name', 'título do produto'],
+      'sku': ['número de referência sku', 'seller sku', 'sku.1'],
+      'preco unitario de venda do anuncio (brl)': ['preço acordado', 'preço unitário', 'valor total do item'],
+      'unidades': ['quantidade', 'quantity', 'quantidade de itens'],
+      'faturamento': ['fat'],
+      'liquido': ['líquido'],
+      'gross margen': ['gross margin', 'margin r$', 'gm'],
+      'gross margen %': ['gross margin %', 'margin %', 'gm %']
+    };
+    var canonical = ['N.º de venda', 'Data da venda', 'Estado', 'Type.1', 'Forma de entrega', '# de anúncio',
+      'Título do anúncio', 'SKU', 'Preço unitário de venda do anúncio (BRL)', 'Unidades', 'Faturamento',
+      'Liquido', 'Gross margen', 'Gross margen %'];
+    var headers = rows[0].map(function (header) { return String(header || '').trim(); });
+    canonical.forEach(function (target) {
+      if (headerIndex(headers, target) >= 0) return;
+      var candidates = aliases[normalized(target)] || [];
+      var sourceIndex = candidates.map(function (candidate) { return headerIndex(headers, candidate); })
+        .find(function (index) { return index >= 0; });
+      if (sourceIndex >= 0) headers[sourceIndex] = target;
+    });
+    return [headers].concat(rows.slice(1));
+  }
+
   function metricHeaderIndex(headers, rule) {
     var aliases = rule[3] || [rule[0]];
     for (var index = 0; index < aliases.length; index += 1) {
@@ -139,6 +171,7 @@
   }
 
   function buildIntegration(rows, fileName) {
+    rows = normalizeTreatedHeaders(rows);
     if (!Array.isArray(rows) || rows.length < 2) throw new Error('O arquivo não contém linhas de vendas.');
     var headers = rows[0].map(function (header) { return String(header || '').trim(); });
     var required = ['Marketplace', 'Marketplace venda', 'Data', 'SKU', 'Título do anúncio'];
