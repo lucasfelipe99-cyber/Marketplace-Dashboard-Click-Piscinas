@@ -216,18 +216,26 @@
     var targetHeaders=target[0],sourceIndexes={};
     (rows[0]||[]).forEach(function(header,index){sourceIndexes[norm(header)]=index;});
     var aliases={
-      'n.º de venda':['id do pedido'],
-      'data da venda':['data completa'],
-      'estado':['status do pedido'],
-      'type.1':['status'],
-      'forma de entrega':['opcao de envio'],
-      '# de anuncio':['id do produto'],
-      'titulo do anuncio':['nome do produto'],
-      'sku':['numero de referencia sku'],
-      'preco unitario de venda do anuncio (brl)':['preco acordado'],
-      'unidades':['quantidade'],
-      'gross margen':['gross margin'],
-      'gross margen %':['gross margin %']
+      'n.º de venda':['id do pedido','id pedido','numero do pedido','numero da venda','pedido','order id','amazon-order-id'],
+      'data da venda':['data completa','data do pedido','data de criacao','data de criacao do pedido','created time','purchase-date'],
+      'data':['data do pedido','data de criacao','data de criacao do pedido','created time','purchase-date'],
+      'estado':['status do pedido','situacao do pedido','order status','order-status','status pacote no momento que o relatorio foi solicitado'],
+      'type.1':['status','tipo','type'],
+      'forma de entrega':['opcao de envio','metodo de envio','tipo de entrega','fulfillment type','fulfillment-channel','modalidade de entrega'],
+      '# de anuncio':['id do produto','id do anuncio','anuncio','asin','sku id','codigo sku seller'],
+      'titulo do anuncio':['nome do produto','titulo','titulo do produto','descricao do produto','product name','product-name'],
+      'sku':['numero de referencia sku','seller sku','sku vendedor','codigo sku','sku.1'],
+      'preco unitario de venda do anuncio (brl)':['preco acordado','preco unitario','preco de venda','valor total do item'],
+      'unidades':['quantidade','qtd','quantity','quantidade de itens'],
+      'faturamento':['receita','valor total','total do item','fat'],
+      'rebate':['reembolso','reembolsos'],
+      'comissao':['taxa de comissao'],
+      'frete':['tarifa de frete','custo de frete'],
+      'cancelamento':['taxa de envio reversa','frete reverso'],
+      'liquido':['valor liquido','receita liquida'],
+      'antecipa':['antecipacao','taxa de antecipacao'],
+      'gross margen':['gross margin','margem bruta'],
+      'gross margen %':['gross margin %','margem bruta %']
     };
     rows.slice(1).forEach(function(row){
       target.push(targetHeaders.map(function(header){
@@ -238,6 +246,7 @@
     });
     return target;
   }
+  function compatibleRows(rows){return appendCompatibleRows([],rows);}
   async function refreshAllPublishedBases(button,status){
     if(!confirm('Retratar e republicar todos os meses de todas as contas? O CMV e a margem serao recalculados com o cadastro de custos atual.'))return;
     var password=prompt('Informe a senha administrativa para atualizar todas as bases:');
@@ -307,15 +316,17 @@
     records.sort(function(a,b){return Number(a.year)-Number(b.year)||Number(a.month)-Number(b.month);});
     if(scope==='latest'&&records.length)records=[records[records.length-1]];
     if(!records.length)throw new Error('Os meses exibidos no histórico antigo não possuem dados tratados salvos. Trate novamente o mês desejado.');
-    var header=null,combined=[],labels=[];
+    var combined=[],labels=[];
     for(var index=0;index<records.length;index+=1){
       var item=records[index],rows=Number(item.year)===currentYear&&session[String(Number(item.month))];
       if(!rows){var response=await fetch('/api/sales-treaters/treated-rows?id='+encodeURIComponent(channel.id)+'&month='+encodeURIComponent(item.month)+'&year='+encodeURIComponent(item.year),{cache:'no-store'}),result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível recuperar '+months[Number(item.month)-1]+'/'+item.year+'.');rows=result.rows;}
-      if(!header&&rows[0])header=rows[0];if(rows.length>1)combined=combined.concat(rows.slice(1));labels.push(months[Number(item.month)-1]+'/'+item.year);
+      combined=appendCompatibleRows(combined,rows);labels.push(months[Number(item.month)-1]+'/'+item.year);
     }
-    return {rows:header&&combined.length?[header].concat(combined):null,labels:labels};
+    return {rows:combined.length>1?combined:null,labels:labels};
   }
   function downloadTreated(rows,channel,month){
+    rows=compatibleRows(rows);
+    if(rows.length<2)throw new Error('Nenhuma linha tratada compatível foi encontrada.');
     var sheet=XLSX.utils.aoa_to_sheet(rows), workbook=XLSX.utils.book_new();
     sheet['!autofilter']={ref:sheet['!ref']};
     sheet['!freeze']={xSplit:0,ySplit:1};
@@ -328,7 +339,7 @@
   function render() {
     var marketplaceOptions=['Mercado Livre','Shopee','TikTok','Amazon','Magalu'].map(function(name){return '<option>'+name+'</option>';}).join('');
     function uploads(channel){var key=norm(channel.marketplace);if(key==='amazon')return '<div class="treat-multi-upload"><label class="treat-upload">Pedidos TXT<input type="file" accept=".txt,.tsv" data-file-kind="sales"></label><label class="treat-upload">Relatório unificado CSV<input type="file" accept=".csv,.txt" data-file-kind="unified"></label><label class="treat-upload">Transações a receber CSV<input type="file" accept=".csv,.txt" data-file-kind="receivable"></label></div>';if(key==='magalu')return '<label class="treat-upload">Selecionar ZIP original Magalu<input type="file" accept=".zip" data-file-kind="raw"></label>';return '<label class="treat-upload">Selecionar relatório bruto '+esc(channel.marketplace)+'<input type="file" accept="'+(key==='mercado livre'?'.xlsx,.xls':'.xlsx')+'" data-file-kind="raw"></label>';}
-    container.innerHTML='<div class="treat-shell"><div class="treat-head"><div><span>CONFIGURAÇÃO · VENDAS</span><h2>Tratador de Vendas</h2><p>Cadastre cada canal, selecione a competência e acompanhe os meses já alimentados.</p></div><div class="treat-head-actions"><form id="treatChannelForm"><select name="marketplace">'+marketplaceOptions+'</select><input name="channelName" required placeholder="Nome do canal / empresa"><input name="taxRate" type="number" min="0" max="100" step=".01" value="14" required placeholder="Imposto %"><label class="treat-shopee-param" hidden><span>Antecipação %</span><input name="anticipationRate" type="number" min="0" max="100" step=".01" value="2.5"></label><label class="treat-shopee-param" hidden><span>Frete</span><input name="freight" type="number" step=".01" value="0"></label><button>Adicionar canal</button></form><div class="treat-refresh-row"><button type="button" data-refresh-all>Atualizar todas as bases</button><small data-refresh-status>Preserva os meses publicados e cria backup automático.</small></div></div></div><section class="treat-list">'+(state.channels.length?state.channels.map(function(channel){var key=norm(channel.marketplace),direct=key!=='mercado livre',canPublish=key==='mercado livre'||key==='magalu',hasSaved=(channel.treatmentHistory||[]).some(function(item){return item.storedName;});return '<article data-channel="'+channel.id+'" data-marketplace="'+esc(channel.marketplace)+'"><div class="treat-channel"><b>'+esc(channel.marketplace)+'</b><strong>'+esc(channel.channelName)+'</strong><small>Imposto: '+num(channel.taxRate).toLocaleString('pt-BR')+'%'+(key==='shopee'?' · Antecipação: '+num(channel.anticipationRate).toLocaleString('pt-BR')+'% · Frete: '+num(channel.freight).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}):'')+'</small></div><label class="treat-month"><span>Mês da venda</span><select data-sale-month>'+months.map(function(m,i){return '<option value="'+(i+1)+'"'+(i===new Date().getMonth()?' selected':'')+'>'+m+'</option>';}).join('')+'</select></label>'+uploads(channel)+'<button data-treat disabled>'+(direct?'Tratar e baixar XLSX':'Tratar arquivo')+'</button>'+(canPublish?'<select class="treat-publish-scope" data-publish-scope><option value="all">Todos os meses tratados</option><option value="latest">Somente o último mês</option></select><button class="primary" data-publish'+(hasSaved?'':' disabled')+'>Enviar para Subir Base de Vendas</button>':'')+'<button class="danger" data-delete>Excluir canal</button><div class="treat-status">Aguardando relatório.</div>'+historyHtml(channel)+'</article>';}).join(''):'<div class="treat-empty">Adicione o primeiro canal de marketplace.</div>')+'</section></div>';
+    container.innerHTML='<div class="treat-shell"><div class="treat-head"><div><span>CONFIGURAÇÃO · VENDAS</span><h2>Tratador de Vendas</h2><p>Cadastre cada canal, selecione a competência e acompanhe os meses já alimentados.</p></div><div class="treat-head-actions"><form id="treatChannelForm"><select name="marketplace">'+marketplaceOptions+'</select><input name="channelName" required placeholder="Nome do canal / empresa"><input name="taxRate" type="number" min="0" max="100" step=".01" value="14" required placeholder="Imposto %"><label class="treat-shopee-param" hidden><span>Antecipação %</span><input name="anticipationRate" type="number" min="0" max="100" step=".01" value="2.5"></label><label class="treat-shopee-param" hidden><span>Frete</span><input name="freight" type="number" step=".01" value="0"></label><button>Adicionar canal</button></form><div class="treat-refresh-row"><button type="button" data-refresh-all>Atualizar todas as bases</button><small data-refresh-status>Preserva os meses publicados e cria backup automático.</small></div></div></div><section class="treat-list">'+(state.channels.length?state.channels.map(function(channel){var key=norm(channel.marketplace),direct=key!=='mercado livre',canPublish=true,hasSaved=(channel.treatmentHistory||[]).some(function(item){return item.storedName;});return '<article data-channel="'+channel.id+'" data-marketplace="'+esc(channel.marketplace)+'"><div class="treat-channel"><b>'+esc(channel.marketplace)+'</b><strong>'+esc(channel.channelName)+'</strong><small>Imposto: '+num(channel.taxRate).toLocaleString('pt-BR')+'%'+(key==='shopee'?' · Antecipação: '+num(channel.anticipationRate).toLocaleString('pt-BR')+'% · Frete: '+num(channel.freight).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}):'')+'</small></div><label class="treat-month"><span>Mês da venda</span><select data-sale-month>'+months.map(function(m,i){return '<option value="'+(i+1)+'"'+(i===new Date().getMonth()?' selected':'')+'>'+m+'</option>';}).join('')+'</select></label>'+uploads(channel)+'<button data-treat disabled>'+(direct?'Tratar e baixar XLSX':'Tratar arquivo')+'</button>'+(canPublish?'<select class="treat-publish-scope" data-publish-scope><option value="all">Todos os meses tratados</option><option value="latest">Somente o último mês</option></select><button class="primary" data-publish'+(hasSaved?'':' disabled')+'>Enviar para Subir Base de Vendas</button>':'')+'<button class="danger" data-delete>Excluir canal</button><div class="treat-status">Aguardando relatório.</div>'+historyHtml(channel)+'</article>';}).join(''):'<div class="treat-empty">Adicione o primeiro canal de marketplace.</div>')+'</section></div>';
     var form=document.getElementById('treatChannelForm'),marketplace=form.elements.marketplace;
     function updateForm(){var shopee=norm(marketplace.value)==='shopee';form.querySelectorAll('.treat-shopee-param').forEach(function(field){field.hidden=!shopee;});form.elements.anticipationRate.required=shopee;form.elements.freight.required=shopee;}
     marketplace.addEventListener('change',updateForm);updateForm();
