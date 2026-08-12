@@ -1806,13 +1806,19 @@ async function handleSalesTreatersUpdate(request, response) {
       if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) return sendJson(response, 400, { error: 'Informe uma alíquota de imposto válida.' });
       const anticipationRate = marketplaceKey === 'shopee' ? Number(payload.anticipationRate) : 0;
       const freight = marketplaceKey === 'shopee' ? Number(payload.freight) : 0;
+      const commissionBelowRate = marketplaceKey === 'tiktok' ? Number(payload.commissionBelowRate) : 10;
+      const commissionBelowFixed = marketplaceKey === 'tiktok' ? Number(payload.commissionBelowFixed) : 4;
+      const commissionAboveRate = marketplaceKey === 'tiktok' ? Number(payload.commissionAboveRate) : 6;
+      const commissionAboveFixed = marketplaceKey === 'tiktok' ? Number(payload.commissionAboveFixed) : 6;
+      const freightRate = marketplaceKey === 'tiktok' ? Number(payload.freightRate) : 4;
       if (!Number.isFinite(anticipationRate) || anticipationRate < 0 || anticipationRate > 100) return sendJson(response, 400, { error: 'Informe uma antecipação válida.' });
       if (!Number.isFinite(freight)) return sendJson(response, 400, { error: 'Informe um frete válido.' });
+      if ([commissionBelowRate, commissionAboveRate, freightRate].some((rate) => !Number.isFinite(rate) || rate < 0 || rate > 100) || [commissionBelowFixed, commissionAboveFixed].some((amount) => !Number.isFinite(amount) || amount < 0)) return sendJson(response, 400, { error: 'Informe valores válidos para comissão e frete do TikTok.' });
       const id = String(payload.id || '').trim();
       const current = state.channels.find((item) => item.id === id);
       const duplicate = state.channels.find((item) => item.id !== id && normalizeAdsText(item.marketplace) === normalizeAdsText(marketplace) && normalizeAdsText(item.channelName) === normalizeAdsText(channelName));
       if (duplicate) return sendJson(response, 400, { error: 'Este canal já está cadastrado.' });
-      const item = { id: current && current.id || crypto.randomUUID(), marketplace, channelName, taxRate, anticipationRate, freight, active: payload.active !== false, updatedAt: new Date().toISOString() };
+      const item = { id: current && current.id || crypto.randomUUID(), marketplace, channelName, taxRate, anticipationRate, freight, commissionBelowRate, commissionBelowFixed, commissionAboveRate, commissionAboveFixed, freightRate, active: payload.active !== false, updatedAt: new Date().toISOString() };
       if (current) Object.assign(current, item); else state.channels.push(item);
     } else if (payload.action === 'delete-channel') {
       const index = state.channels.findIndex((item) => item.id === String(payload.id || ''));
@@ -2006,7 +2012,7 @@ async function handleMarketplaceSalesTransform(request, response, marketplaceKey
     const channel = state.channels.find((item) => item.id === String(payload.channelId || ''));
     if (!channel) return sendJson(response, 404, { error: 'Canal não encontrado.' });
     if (normalizeAdsText(channel.marketplace) !== marketplaceKey) return sendJson(response, 400, { error: 'O canal selecionado não pertence a este marketplace.' });
-    const input = Object.assign({}, payload, { channelName: channel.channelName, taxRate: channel.taxRate });
+    const input = Object.assign({}, payload, { channelName: channel.channelName, taxRate: channel.taxRate, commissionBelowRate: channel.commissionBelowRate, commissionBelowFixed: channel.commissionBelowFixed, commissionAboveRate: channel.commissionAboveRate, commissionAboveFixed: channel.commissionAboveFixed, freightRate: channel.freightRate });
     let result;
     if (marketplaceKey === 'tiktok') result = transformTikTok(input, readPricingDatabase());
     else if (marketplaceKey === 'amazon') result = transformAmazon(input, readPricingDatabase());

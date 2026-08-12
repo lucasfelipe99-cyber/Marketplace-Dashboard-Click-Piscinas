@@ -6,11 +6,14 @@ const matrix = (records) => ({ headers:Object.keys(records[0]), rows:records.map
 
 const tik = matrix([{ 'Order ID':'585277532531557414','Order Status':'A ser enviado','SKU ID':'1736376643662677071','Seller SKU':'GA903','Product Name':'Produto','Quantity':'1','SKU Subtotal Before Discount':'BRL 98,90','SKU Seller Discount':'BRL 52,91','Created Time':'07/29/2026 11:03:50 PM','Fulfillment Type':'Fulfillment by seller' }]);
 let result=transformTikTok({...tik,channelName:'Box fan',taxRate:14},db);
-assert.equal(result.rows[0][6],'Venda');assert(Math.abs(result.rows[0][13]-45.99)<1e-9);assert(Math.abs(result.rows[0][23]-13.0417)<1e-6);
+assert.equal(result.rows[0][6],'Venda');assert(Math.abs(result.rows[0][13]-45.99)<1e-9);assert(Math.abs(result.rows[0][16]+8.599)<1e-9);assert(Math.abs(result.rows[0][17]+1.8396)<1e-9);assert(Math.abs(result.rows[0][23]-13.9615)<1e-6);
 assert.equal(result.rows[0][4],'2026-07-29','TikTok deve interpretar Created Time como MM/DD/YYYY');
 const tikAmbiguousDate=matrix([{ 'Order ID':'D-1','Order Status':'A ser enviado','SKU ID':'SKU-D','Seller SKU':'GA903','Product Name':'Data americana','Quantity':'1','SKU Subtotal Before Discount':'BRL 45,99','SKU Seller Discount':'BRL 0','Created Time':'08/10/2026 4:50:00 PM','Fulfillment Type':'Fulfillment by seller' }]);
 result=transformTikTok({...tikAmbiguousDate,channelName:'Box fan',taxRate:14},db);
 assert.equal(result.rows[0][4],'2026-08-10','TikTok não pode inverter dia e mês em datas americanas ambíguas');
+const tikAbove50=matrix([{ 'Order ID':'T-50','Order Status':'A ser enviado','SKU ID':'SKU-50','Seller SKU':'GA903','Product Name':'Acima de cinquenta','Quantity':'1','SKU Subtotal Before Discount':'BRL 100,00','SKU Seller Discount':'BRL 0','Created Time':'08/10/2026 4:50:00 PM','Fulfillment Type':'Fulfillment by seller' }]);
+result=transformTikTok({...tikAbove50,channelName:'Box fan',taxRate:14},db);
+assert(Math.abs(result.rows[0][16]+12)<1e-9,'Acima de R$ 50: comissao deve ser 6% + R$ 6');assert(Math.abs(result.rows[0][17]+4)<1e-9,'Frete deve ser 4% do faturamento');
 const tikCancelled=matrix([{ 'Order ID':'C-1','Order Status':'Cancelado','SKU ID':'SKU-C','Seller SKU':'GA903','Product Name':'Cancelado','Quantity':'1','SKU Subtotal Before Discount':'BRL 45,99','SKU Seller Discount':'BRL 0','Created Time':'07/29/2026 11:03:50 PM','Fulfillment Type':'Fulfillment by seller' }]);
 result=transformTikTok({...tikCancelled,channelName:'Box fan',taxRate:14},db);
 assert.equal(result.rows[0][6],'Cancelado');assert.equal(result.rows[0][16],0);assert.equal(result.rows[0][17],0);assert.equal(result.rows[0][18],-45.99);assert.equal(result.rows[0][19],0);assert.equal(result.rows[0][21],0);assert.equal(result.rows[0][22],0);
