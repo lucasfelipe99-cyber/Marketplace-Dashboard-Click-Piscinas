@@ -1806,11 +1806,12 @@ async function handleSalesTreatersUpdate(request, response) {
       if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) return sendJson(response, 400, { error: 'Informe uma alíquota de imposto válida.' });
       const anticipationRate = marketplaceKey === 'shopee' ? Number(payload.anticipationRate) : 0;
       const freight = marketplaceKey === 'shopee' ? Number(payload.freight) : 0;
-      const commissionBelowRate = marketplaceKey === 'tiktok' ? Number(payload.commissionBelowRate) : 10;
-      const commissionBelowFixed = marketplaceKey === 'tiktok' ? Number(payload.commissionBelowFixed) : 4;
-      const commissionAboveRate = marketplaceKey === 'tiktok' ? Number(payload.commissionAboveRate) : 6;
-      const commissionAboveFixed = marketplaceKey === 'tiktok' ? Number(payload.commissionAboveFixed) : 6;
-      const freightRate = marketplaceKey === 'tiktok' ? Number(payload.freightRate) : 4;
+      const tiktokNumber = (value, fallback) => value == null || String(value).trim() === '' ? fallback : Number(value);
+      const commissionBelowRate = marketplaceKey === 'tiktok' ? tiktokNumber(payload.commissionBelowRate, 10) : 10;
+      const commissionBelowFixed = marketplaceKey === 'tiktok' ? tiktokNumber(payload.commissionBelowFixed, 4) : 4;
+      const commissionAboveRate = marketplaceKey === 'tiktok' ? tiktokNumber(payload.commissionAboveRate, 6) : 6;
+      const commissionAboveFixed = marketplaceKey === 'tiktok' ? tiktokNumber(payload.commissionAboveFixed, 6) : 6;
+      const freightRate = marketplaceKey === 'tiktok' ? tiktokNumber(payload.freightRate, 4) : 4;
       if (!Number.isFinite(anticipationRate) || anticipationRate < 0 || anticipationRate > 100) return sendJson(response, 400, { error: 'Informe uma antecipação válida.' });
       if (!Number.isFinite(freight)) return sendJson(response, 400, { error: 'Informe um frete válido.' });
       if ([commissionBelowRate, commissionAboveRate, freightRate].some((rate) => !Number.isFinite(rate) || rate < 0 || rate > 100) || [commissionBelowFixed, commissionAboveFixed].some((amount) => !Number.isFinite(amount) || amount < 0)) return sendJson(response, 400, { error: 'Informe valores válidos para comissão e frete do TikTok.' });
