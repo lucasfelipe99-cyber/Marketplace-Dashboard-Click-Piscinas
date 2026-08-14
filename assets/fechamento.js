@@ -948,6 +948,86 @@
     return body.join('');
   }
 
+  function getDreClassificationOrder(label) {
+    var key = normalizeCashKey(label);
+    var found = mappings.find(function (mapping) {
+      return normalizeCashKey(mapping[1]) === key;
+    });
+    return found ? Number(found[2]) : 500;
+  }
+
+  function isDreCostRecord(record, costType) {
+    var order = getDreClassificationOrder(record.classification);
+    return costType === 'fixed' ? order >= 6 && order <= 16 : order >= 17 && order <= 21;
+  }
+
+  function buildDreCostHierarchy(label, records, activeMonths, costType) {
+    var rootId = 'dre-' + costType + '-total';
+    var root = createCashHierarchyRow(label, records, activeMonths, 'classification', rootId, '', true)
+      .replace('cash-hierarchy-row cash-level-classification', 'cash-hierarchy-row cash-level-classification total-row');
+    var body = [root];
+    var classifications = [];
+    var byClassification = new Map();
+
+    records.forEach(function (record) {
+      var classification = record.classification || 'Sem classificaÃ§Ã£o';
+      if (!byClassification.has(classification)) {
+        byClassification.set(classification, []);
+        classifications.push(classification);
+      }
+      byClassification.get(classification).push(record);
+    });
+    classifications.sort(function (a, b) {
+      return getDreClassificationOrder(a) - getDreClassificationOrder(b) || String(a).localeCompare(String(b), 'pt-BR');
+    });
+
+    classifications.forEach(function (classification, classificationIndex) {
+      var classificationRows = byClassification.get(classification);
+      var classificationId = rootId + '-class-' + classificationIndex;
+      body.push(createCashHierarchyRow(classification, classificationRows, activeMonths,
+        'classification', classificationId, rootId, true));
+
+      var categories = [];
+      var byCategory = new Map();
+      classificationRows.forEach(function (record) {
+        var category = record.category || 'Sem categoria';
+        if (!byCategory.has(category)) {
+          byCategory.set(category, []);
+          categories.push(category);
+        }
+        byCategory.get(category).push(record);
+      });
+      categories.sort(function (a, b) {
+        return getFinancialOrder(a, true) - getFinancialOrder(b, true) || String(a).localeCompare(String(b), 'pt-BR');
+      });
+
+      categories.forEach(function (category, categoryIndex) {
+        var categoryRows = byCategory.get(category);
+        categoryRows.sort(function (a, b) { return (a.line || 0) - (b.line || 0); });
+        var categoryId = classificationId + '-cat-' + categoryIndex;
+        body.push(createCashHierarchyRow(category, categoryRows, activeMonths,
+          'category', categoryId, classificationId, true));
+
+        var clients = [];
+        var byClient = new Map();
+        categoryRows.forEach(function (record) {
+          var client = record.client || 'Sem cliente / fornecedor';
+          if (!byClient.has(client)) {
+            byClient.set(client, []);
+            clients.push(client);
+          }
+          byClient.get(client).push(record);
+        });
+        clients.sort(function (a, b) { return String(a).localeCompare(String(b), 'pt-BR'); });
+        clients.forEach(function (client, clientIndex) {
+          body.push(createCashHierarchyRow(client, byClient.get(client), activeMonths, 'launch',
+            categoryId + '-client-' + clientIndex, categoryId, false));
+        });
+      });
+    });
+    return body.join('');
+  }
+
   function renderSummary(selectedYear) {
     var container = document.getElementById('cashSummaryContainer');
     if (!container) return;
@@ -1058,6 +1138,14 @@
       return normalizeCashKey(row.label).indexOf('MARGEM DE CONTRIBUICAO TOTAL R$') >= 0;
     });
     var body = rows.map(function (row, rowIndex) {
+      var rowKey = normalizeCashKey(row.label);
+      var costType = rowKey === 'CUSTO FIXO TOTAL' ? 'fixed' : rowKey === 'CUSTO VARIAVEL TOTAL' ? 'variable' : '';
+      if (costType) {
+        var costRecords = yearRecords.filter(function (record) { return isDreCostRecord(record, costType); });
+        if (costRecords.length) return buildDreCostHierarchy(row.label, costRecords, activeMonths, costType);
+      }
+      var rowOrder = getDreClassificationOrder(row.label);
+      if ((rowOrder >= 6 && rowOrder <= 16) || (rowOrder >= 17 && rowOrder <= 21)) return '';
       var classificationRows = rowIndex > marginIndex ? yearRecords.filter(function (record) {
         return normalizeCashKey(record.classification) === normalizeCashKey(row.label);
       }) : [];
@@ -1070,7 +1158,6 @@
           ? new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(value)
           : numericButton(row.label, activeMonths[index], value, 'dre')) + '</td>';
       }).join('');
-      var rowKey = normalizeCashKey(row.label);
       var total = isPercent ? (row.values[row.values.length - 1] || 0) : sum(row.values);
       if (rowKey === 'MARGEM PARA O PONTO DE EQUILIBRIO') {
         var annualRevenue = sum(activeMonths.map(function (month) { return getDreActual('FATURAMENTO TOTAL', month, year); }));
@@ -1102,6 +1189,7 @@
       '<th>TOTAL</th></tr></thead><tbody>' + body + '</tbody></table></div></div></div>';
     var companySelect = document.getElementById('dreCompany');
     if (companySelect) companySelect.addEventListener('change', function () { selectedFinancialCompany = this.value; refreshSalesRevenueFromDashboardUploads().then(function () { renderDre(); renderCashFlow(); renderSummary(); }); });
+    bindCashExpandButtons(document.getElementById('dreContainer'));
   }
 
   function getDreActual(label, month, year) {
