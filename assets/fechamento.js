@@ -1434,6 +1434,36 @@
       ? structure.splice(breakEvenIndex, 1)[0]
       : { label: 'MARGEM PARA O PONTO DE EQUIL\u00cdBRIO', subtotal: 2 };
     structure.push(resultValueLine, resultPercentageLine, breakEvenLine);
+    var requiredDreFooterKeys = new Set([
+      'CUSTO FIXO TOTAL', 'RESULTADO OPERACIONAL R$', 'RESULTADO OPERACIONAL %',
+      'CUSTO VARIAVEL TOTAL', 'CUSTO VARIADO R$', 'CUSTO VARIADO %', 'CUSTO TOTAL',
+      'RESULTADO R$', 'RESULTADO %', 'MARGEM PARA O PONTO DE EQUILIBRIO'
+    ]);
+    structure = structure.filter(function (line) {
+      return !requiredDreFooterKeys.has(normalizeCashKey(line.label));
+    });
+    var contributionPercentIndex = structure.findIndex(function (line) {
+      return normalizeCashKey(line.label).indexOf('MARGEM DE CONTRIBUICAO TOTAL %') >= 0;
+    });
+    if (contributionPercentIndex < 0) {
+      var contributionValueIndex = structure.findIndex(function (line) {
+        return normalizeCashKey(line.label).indexOf('MARGEM DE CONTRIBUICAO TOTAL R$') >= 0;
+      });
+      structure.splice(contributionValueIndex >= 0 ? contributionValueIndex + 1 : structure.length, 0,
+        { label: 'MARGEM DE CONTRIBUI\u00c7\u00c3O TOTAL %', subtotal: 2 });
+      contributionPercentIndex = contributionValueIndex >= 0 ? contributionValueIndex + 1 : structure.length - 1;
+    }
+    var footerInsertIndex = contributionPercentIndex >= 0 ? contributionPercentIndex + 1 : structure.length;
+    structure.splice(footerInsertIndex, 0,
+      { label: 'CUSTO FIXO TOTAL', subtotal: 1 },
+      { label: 'RESULTADO OPERACIONAL R$', subtotal: 1 },
+      { label: 'RESULTADO OPERACIONAL %', subtotal: 2 },
+      { label: 'CUSTO VARI\u00c1VEL TOTAL', subtotal: 1 },
+      { label: 'CUSTO TOTAL', subtotal: 1 },
+      { label: 'RESULTADO R$', subtotal: 1 },
+      { label: 'RESULTADO %', subtotal: 2 },
+      { label: 'MARGEM PARA O PONTO DE EQUIL\u00cdBRIO', subtotal: 2 }
+    );
     var rows = structure.map(function (line) {
       return { label: line.label, subtotal: Number(line.subtotal) || 0, values: activeMonths.map(function (month) {
         return getDreActual(line.label, month, year);
