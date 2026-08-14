@@ -3643,6 +3643,12 @@
       color: var(--text-muted);
     }
 
+    .copilot-launcher[hidden],
+    .copilot-panel[hidden],
+    #intelligentPanel[hidden] {
+      display: none !important;
+    }
+
     .copilot-launcher {
       position: fixed;
       right: 24px;
@@ -4590,7 +4596,7 @@
 
 
 </style>
-  <link rel="stylesheet" href="/assets/fechamento.css?v=9">
+  <link rel="stylesheet" href="/assets/fechamento.css?v=10-20260814-cash-tools">
   <link rel="stylesheet" href="/assets/vendas-upload.css?v=5-20260814-ads-collapsible-months">
 </head>
 <body>
@@ -4679,7 +4685,6 @@
         <button class="tab-button" type="button" data-tab="goalsPanel"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1"></circle><path d="m15 9 5-5"></path><path d="M17 4h3v3"></path></svg></span><span class="nav-label">Metas</span></button>
         <button class="tab-button" type="button" data-tab="abcPanel"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5"></path><path d="m3 16 9 5 9-5"></path></svg></span><span class="nav-label">Curva ABC</span></button>
         <button class="tab-button" type="button" data-tab="advertisingPanel"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m3 11 15-6v14L3 13v-2Z"></path><path d="M7 14v5"></path><path d="M18 9a3 3 0 0 1 0 6"></path></svg></span><span class="nav-label">Publicidade</span></button>
-        <button class="tab-button" type="button" data-tab="intelligentPanel"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3a5 5 0 0 0-5 5v1a4 4 0 0 0-2 3.5A4.5 4.5 0 0 0 9.5 17H11"></path><path d="M12 3a5 5 0 0 1 5 5v1a4 4 0 0 1 2 3.5A4.5 4.5 0 0 1 14.5 17H13"></path><path d="M9 21h6"></path><path d="M12 17v4"></path></svg></span><span class="nav-label">An&aacute;lise Inteligente com IA</span></button>
         <button class="tab-button" type="button" data-tab="salesHistoryPanel"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path><path d="M12 7v5l3 2"></path></svg></span><span class="nav-label">Hist&oacute;rico de Venda</span></button>
         </div>
 
@@ -4866,7 +4871,7 @@
         <div class="empty-table">Carregue uma base para visualizar a performance de publicidade.</div>
       </div>
     </section>
-    <section class="tab-panel" id="intelligentPanel">
+    <section class="tab-panel" id="intelligentPanel" hidden>
       <div class="macro-dashboard" id="intelligentContainer">
         <div class="empty-table">Preparando a Análise Inteligente com IA.</div>
       </div>
@@ -4929,8 +4934,8 @@
     </section>
   </div>
 
-  <button class="copilot-launcher" id="copilotLauncher" type="button" aria-label="Abrir Copiloto FP&A" aria-expanded="false">IA</button>
-  <aside class="copilot-panel" id="copilotPanel" aria-label="Copiloto FP&A" aria-hidden="true">
+  <button class="copilot-launcher" id="copilotLauncher" type="button" aria-label="Abrir Copiloto FP&A" aria-expanded="false" hidden>IA</button>
+  <aside class="copilot-panel" id="copilotPanel" aria-label="Copiloto FP&A" aria-hidden="true" hidden>
     <header class="copilot-header">
       <div class="copilot-header-copy">
         <strong>Copiloto FP&amp;A</strong>
@@ -14132,16 +14137,16 @@
   <script src="/assets/frete-combinar.js?v=1-20260730"></script>
   <link rel="stylesheet" href="/assets/product-master.css?v=2">
   <script src="/assets/product-master.js?v=5"></script>
-  <script src="/assets/fechamento.js?v=33-20260730"></script>
+  <script src="/assets/fechamento.js?v=36-20260814-company-scope"></script>
   <script src="/assets/ads-upload.js?v=10-20260814-ads-collapsible-months"></script>
-  <link rel="stylesheet" href="/assets/contas.css?v=5">
-  <script src="/assets/contas.js?v=6"></script>
+  <link rel="stylesheet" href="/assets/contas.css?v=6-20260814-clear-all">
+  <script src="/assets/contas.js?v=9-20260814-company-scope"></script>
   <link rel="stylesheet" href="/assets/estoque.css?v=1">
   <script src="/assets/estoque.js?v=2"></script>
-  <link rel="stylesheet" href="/assets/estoque-full.css?v=4">
-  <script src="/assets/estoque-full.js?v=13"></script>
-  <link rel="stylesheet" href="/assets/calculadora-preco.css?v=8">
-  <script src="/assets/calculadora-preco.js?v=12"></script>
+  <link rel="stylesheet" href="/assets/estoque-full.css?v=5-20260814-upload">
+  <script src="/assets/estoque-full.js?v=14-20260814-upload"></script>
+  <link rel="stylesheet" href="/assets/calculadora-preco.css?v=9">
+  <script src="/assets/calculadora-preco.js?v=13"></script>
 </body>
 </html>
 

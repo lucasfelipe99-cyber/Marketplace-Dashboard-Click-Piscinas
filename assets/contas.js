@@ -28,7 +28,36 @@
     state = result;
     if (Array.isArray(result.financialOptions) && result.financialOptions.length) options = result.financialOptions;
     renderAll();
+    syncAccountsToReports();
     return result;
+  }
+
+  function accountReportRecords() {
+    var companies = {}; var people = {};
+    (state.companies || []).forEach(function (item) { companies[item.id] = item.name; });
+    (state.counterparties || []).forEach(function (item) { people[item.id] = item.name; });
+    function mapRecord(record, type) {
+      var date = record.status === 'settled' && record.settledAt ? record.settledAt : record.dueDate;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return null;
+      return {
+        externalId: 'account-' + record.id, year: Number(date.slice(0, 4)), month: Number(date.slice(5, 7)),
+        date: date, dateLabel: date.split('-').reverse().join('/'), client: people[record.counterpartyId] || '',
+        history: record.description, category: record.category, classification: record.classification,
+        companyId: record.companyId, company: companies[record.companyId] || '', account: record.account || '',
+        value: type === 'payable' ? -Math.abs(record.amount) : Math.abs(record.amount),
+        type: type === 'payable' ? 'D' : 'C', line: 0,
+        financialStatus: record.status === 'settled' ? 'realized' : 'forecast',
+        competenceDate: record.competenceDate || record.dueDate
+      };
+    }
+    return (state.payables || []).map(function (record) { return mapRecord(record, 'payable'); })
+      .concat((state.receivables || []).map(function (record) { return mapRecord(record, 'receivable'); })).filter(Boolean);
+  }
+
+  function syncAccountsToReports() {
+    if (window.financialClosing && window.financialClosing.syncAccountRecords) {
+      window.financialClosing.syncAccountRecords(accountReportRecords());
+    }
   }
 
   function classifications() {
@@ -137,8 +166,8 @@
     var container = document.getElementById(id);
     if (!container) return;
     container.innerHTML = '<div class="accounts-shell"><div class="accounts-head"><div><h2>' + title +
-      '</h2><p>Cadastre manualmente ou importe uma planilha. A baixa alimenta automaticamente o Fluxo de Caixa.</p></div>' +
-      '<div class="accounts-head-tools"><label>Empresa<select data-company-filter="' + type + '">' + companyOptions(companyFilters[type], true) + '</select></label><label class="accounts-upload">Importar planilha<input type="file" data-accounts-file="' + type + '" accept=".xlsx,.xls,.csv"></label></div></div>' +
+      '</h2><p>Títulos em aberto alimentam a previsão; títulos baixados entram como realizados no Fluxo de Caixa e na DRE.</p></div>' +
+      '<div class="accounts-head-tools"><label>Empresa<select data-company-filter="' + type + '">' + companyOptions(companyFilters[type], true) + '</select></label><label class="accounts-upload">Importar planilha<input type="file" data-accounts-file="' + type + '" accept=".xlsx,.xls,.csv"></label><button class="accounts-clear-all" type="button" data-clear-all-accounts>Limpar todos os lançamentos</button></div></div>' +
       '<section class="accounts-card"><h3>Novo título</h3>' + accountForm(type) + '</section>' +
       '<section class="accounts-card"><h3>Títulos cadastrados</h3>' + recordTable(type) + '</section></div>';
     bindAccountContainer(container, type);
@@ -147,6 +176,18 @@
   function bindAccountContainer(container, type) {
     var companyFilter = container.querySelector('[data-company-filter]');
     if (companyFilter) companyFilter.addEventListener('change', function () { companyFilters[type] = this.value; renderAccounts(type); });
+    var clearAll = container.querySelector('[data-clear-all-accounts]');
+    if (clearAll) clearAll.addEventListener('click', async function () {
+      var selectedCompanyId = companyFilters[type] || '';
+      var selectedCompany = (state.companies || []).find(function (item) { return item.id === selectedCompanyId; });
+      var total = (state.payables || []).concat(state.receivables || []).filter(function (record) {
+        return !selectedCompanyId || record.companyId === selectedCompanyId;
+      }).length;
+      if (!total) return alert('Não há lançamentos para limpar.');
+      var scope = selectedCompany ? ' da empresa ' + selectedCompany.name : ' de todas as empresas';
+      if (!window.confirm('Apagar os ' + total + ' lançamentos' + scope + ' em Contas a Pagar e Contas a Receber? Esta ação não poderá ser desfeita.')) return;
+      try { await api({ action: 'clear-all-accounts', companyId: selectedCompanyId }); } catch (error) { alert(error.message); }
+    });
     Array.from(container.querySelectorAll('[data-config-form]')).forEach(function (configForm) {
       configForm.addEventListener('submit', async function (event) {
         event.preventDefault();
@@ -296,8 +337,14 @@
         fetch('/api/accounts', { cache: 'no-store' }).then(function (response) { return response.json(); }),
         fetch('/api/financial-options', { cache: 'no-store' }).then(function (response) { return response.json(); })
       ]);
-      state = loaded[0]; options = loaded[1].options || []; renderAll();
+      state = loaded[0]; options = loaded[1].options || []; renderAll(); syncAccountsToReports();
     } catch (error) { console.error('Falha ao carregar contas:', error); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  document.addEventListener('financial-closing-ready', syncAccountsToReports);
+  document.addEventListener('accounts-cleared-from-cash-flow', function (event) {
+    if (event.detail) state = event.detail;
+    else { state.payables = []; state.receivables = []; }
+    renderAll();
+  });
 })();

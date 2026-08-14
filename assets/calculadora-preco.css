@@ -18,6 +18,8 @@
 .pricing-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 .pricing-button { width: auto; padding: 0 17px; font-weight: 850; cursor: pointer; }
 .pricing-button.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+.pricing-import-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.pricing-import-buttons .pricing-button { display: inline-flex; align-items: center; justify-content: center; }
 .pricing-results { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .pricing-result { padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .pricing-result strong, .pricing-result span { display: block; }

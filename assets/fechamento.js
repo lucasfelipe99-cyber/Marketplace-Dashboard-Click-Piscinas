@@ -352,6 +352,63 @@
       }).join('') + '</tbody></table></div></div>';
   }
 
+  function downloadCashFlowTemplate() {
+    if (typeof XLSX === 'undefined') return alert('Gerador de Excel não está disponível.');
+    var headers = ['ANO', 'Mês', 'Data', 'Cliente/Fornecedor', 'Histórico', 'Categoria', 'Classificação', 'Conta', 'Valor', 'Tipo'];
+    var workbook = XLSX.utils.book_new();
+    var worksheet = XLSX.utils.aoa_to_sheet([headers]);
+    worksheet['!cols'] = [
+      { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 28 }, { wch: 36 },
+      { wch: 24 }, { wch: 28 }, { wch: 22 }, { wch: 16 }, { wch: 10 }
+    ];
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Fluxo de Caixa');
+    var instructions = XLSX.utils.aoa_to_sheet([
+      ['MODELO DE IMPORTAÇÃO — FLUXO DE CAIXA'],
+      ['Preencha uma linha por lançamento e não altere os nomes das colunas.'],
+      ['Data', 'Use DD/MM/AAAA. Se ficar vazia, ANO e Mês definirão o primeiro dia da competência.'],
+      ['Valor', 'Informe entradas como positivas e saídas como negativas.'],
+      ['Tipo', 'Use C para crédito/entrada ou D para débito/saída.']
+    ]);
+    instructions['!cols'] = [{ wch: 24 }, { wch: 90 }];
+    XLSX.utils.book_append_sheet(workbook, instructions, 'LEIA-ME');
+    XLSX.writeFile(workbook, 'MODELO_FLUXO_DE_CAIXA.xlsx', { bookType: 'xlsx' });
+  }
+
+  async function clearAllCashFlow() {
+    var company = financialCompanies.find(function (item) { return item.id === selectedFinancialCompany; });
+    var total = cashFlowState.records.filter(function (record) {
+      return !selectedFinancialCompany || record.companyId === selectedFinancialCompany;
+    }).length;
+    if (!total) return alert('Não há lançamentos no Fluxo de Caixa para apagar.');
+    var scope = company ? ' da empresa ' + company.name : ' de todas as empresas';
+    var message = 'Apagar os ' + total.toLocaleString('pt-BR') + ' lançamentos' + scope + ' do Fluxo de Caixa?\n\n' +
+      'Para reiniciar do zero, esta ação também apagará os títulos de Contas a Pagar e Contas a Receber vinculados aos relatórios. Esta ação não poderá ser desfeita.';
+    if (!window.confirm(message)) return;
+    try {
+      var response = await fetch('/api/accounts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear-all-accounts', companyId: selectedFinancialCompany })
+      });
+      var accounts = await response.json();
+      if (!response.ok) throw new Error(accounts.error || 'Não foi possível limpar as contas vinculadas.');
+      cashFlowState.records = selectedFinancialCompany ? cashFlowState.records.filter(function (record) {
+        return record.companyId !== selectedFinancialCompany;
+      }) : [];
+      cashFlowState.preview = null;
+      cashFlowState.fileName = '';
+      cashFlowState.importedAt = '';
+      rebuildCashSummaryFromRecords();
+      saveClosingState();
+      document.dispatchEvent(new CustomEvent('accounts-cleared-from-cash-flow', { detail: accounts }));
+      renderCashFlow();
+      renderSummary();
+      renderDre();
+      renderBudget();
+    } catch (error) {
+      alert(error.message || 'Não foi possível apagar o Fluxo de Caixa.');
+    }
+  }
+
   function renderCashFlow() {
     var container = document.getElementById('cashFlowContainer');
     if (!container) return;
@@ -369,7 +426,9 @@
       '<th>TOTAL</th></tr></thead><tbody>' + buildCashSummaryHierarchy(hierarchyRecords, activeMonths) + '</tbody></table></div></div>' : '';
     container.innerHTML = '<div class="closing-shell">' +
       head('Base — Fluxo de Caixa', 'Importação, validação e consulta dos lançamentos financeiros.',
-        financialCompanyControl('cashFlowCompany') + '<label class="closing-button primary" for="cashFlowFileInput">Importar fluxo de caixa</label><input class="closing-input" id="cashFlowFileInput" type="file" accept=".xlsx,.xls,.csv" aria-label="Selecionar arquivo do fluxo de caixa">') +
+        financialCompanyControl('cashFlowCompany') + '<button class="closing-button" id="cashFlowTemplateButton" type="button">Baixar base modelo</button>' +
+        '<label class="closing-button primary" for="cashFlowFileInput">Importar fluxo de caixa</label><input class="closing-input" id="cashFlowFileInput" type="file" accept=".xlsx,.xls,.csv" aria-label="Selecionar arquivo do fluxo de caixa">' +
+        '<button class="closing-button danger" id="cashFlowClearButton" type="button">Apagar tudo</button>') +
       kpis([['Entradas do período', entries], ['Saídas do período', exits], ['Saldo do período', balance], ['Saldo acumulado', balance]]) +
       '<div id="cashImportPreview"></div>' +
       hierarchy + (records.length ? cashFlowTable(records) : emptyCashFlowTable()) + '</div>';
@@ -377,6 +436,10 @@
     if (fileInput) {
       fileInput.addEventListener('change', handleCashFlowFile);
     }
+    var templateButton = document.getElementById('cashFlowTemplateButton');
+    if (templateButton) templateButton.addEventListener('click', downloadCashFlowTemplate);
+    var clearButton = document.getElementById('cashFlowClearButton');
+    if (clearButton) clearButton.addEventListener('click', clearAllCashFlow);
     var companySelect = document.getElementById('cashFlowCompany');
     if (companySelect) companySelect.addEventListener('change', function () { selectedFinancialCompany = this.value; refreshSalesRevenueFromDashboardUploads().then(function () { renderCashFlow(); renderSummary(); renderDre(); }); });
     bindCashExpandButtons(container);
@@ -1448,9 +1511,28 @@
     renderBudget(selectedBudgetMonth, selectedBudgetYear);
   }
 
+  function syncAccountCashRecords(records) {
+    var accountRecords = Array.isArray(records) ? records.filter(function (record) {
+      return record && String(record.externalId || '').indexOf('account-') === 0;
+    }) : [];
+    cashFlowState.records = cashFlowState.records.filter(function (record) {
+      return String(record.externalId || '').indexOf('account-') !== 0;
+    }).concat(accountRecords);
+    cashFlowState.records.sort(function (a, b) {
+      return String(a.date || '').localeCompare(String(b.date || '')) || Number(a.line || 0) - Number(b.line || 0);
+    });
+    rebuildCashSummaryFromRecords();
+    saveClosingState();
+    renderCashFlow();
+    renderSummary();
+    renderDre();
+    renderBudget(selectedBudgetMonth, selectedBudgetYear);
+  }
+
   window.financialClosing = window.financialClosing || {};
   window.financialClosing.addExternalRecord = addExternalCashRecord;
   window.financialClosing.removeExternalRecord = removeExternalCashRecord;
+  window.financialClosing.syncAccountRecords = syncAccountCashRecords;
 
   async function boot() {
     var restored = await loadClosingState();
@@ -1472,6 +1554,7 @@
     renderCashFlow();
     renderSummary();
     renderDre();
+    document.dispatchEvent(new CustomEvent('financial-closing-ready'));
     renderBudgetEditor(selectedBudgetYear);
     renderBudget();
     renderMapping('');

@@ -91,32 +91,35 @@
   function normalizeHeader(value) {
     return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
   }
-  function parseProductCsv(text) {
-    var lines = String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/).filter(function (line) { return line.trim(); });
-    if (lines.length < 2) throw new Error('O arquivo não possui produtos.');
-    var headers = csvCells(lines[0]).map(normalizeHeader);
+  function headerPosition(headers, aliases) {
+    return headers.findIndex(function (header) {
+      return aliases.some(function (alias) { return header === alias || header.startsWith(alias); });
+    });
+  }
+  function parseProductMatrix(matrix, headerRowIndex) {
+    var headers = (matrix[headerRowIndex] || []).map(normalizeHeader);
     var positions = {
-      SKU: headers.indexOf('SKU'),
-      DESCRICAO: headers.findIndex(function (header) { return header.startsWith('DESCRI'); }),
-      CUSTO: headers.indexOf('CUSTO'),
-      ALTURA: headers.indexOf('ALTURA'),
-      LARGURA: headers.indexOf('LARGURA'),
-      COMPR: headers.indexOf('COMPR'),
-      PESOREAL: headers.indexOf('PESOREAL')
+      SKU: headerPosition(headers, ['SKU']),
+      DESCRICAO: headerPosition(headers, ['DESCRICAO', 'DESCRI']),
+      CUSTO: headerPosition(headers, ['CUSTOTOTAL', 'CUSTODOPRODUTO', 'CUSTO']),
+      ALTURA: headerPosition(headers, ['ALTURACM', 'ALTURA']),
+      LARGURA: headerPosition(headers, ['LARGURACM', 'LARGURA']),
+      COMPR: headerPosition(headers, ['COMPRIMENTOCM', 'COMPRIMENTO', 'COMPR']),
+      PESOREAL: headerPosition(headers, ['PESOGRAMAS', 'PESOREALG', 'PESOREAL'])
     };
     var missing = Object.keys(positions).filter(function (header) { return positions[header] < 0; });
     if (missing.length) throw new Error('Colunas ausentes: ' + missing.join(', ') + '.');
     var map = {}, duplicates = 0;
-    lines.slice(1).forEach(function (line, rowIndex) {
-      var cells = csvCells(line), sku = String(cells[positions.SKU] || '').trim();
-      if (!sku) throw new Error('SKU vazio na linha ' + (rowIndex + 2) + '.');
+    matrix.slice(headerRowIndex + 1).forEach(function (cells, rowIndex) {
+      var sku = String(cells[positions.SKU] || '').trim();
+      if (!sku) return;
       var cost = localizedNumber(cells[positions.CUSTO]);
       var height = localizedNumber(cells[positions.ALTURA]);
       var width = localizedNumber(cells[positions.LARGURA]);
       var length = localizedNumber(cells[positions.COMPR]);
       var weightGrams = localizedNumber(cells[positions.PESOREAL]);
       if ([cost, height, width, length, weightGrams].some(function (value) { return Number.isNaN(value); })) {
-        throw new Error('Valor numérico inválido na linha ' + (rowIndex + 2) + '.');
+        throw new Error('Valor numérico inválido na linha ' + (headerRowIndex + rowIndex + 2) + '.');
       }
       if (map[sku]) duplicates += 1;
       map[sku] = {
@@ -130,7 +133,45 @@
         realWeight: weightGrams / 1000
       };
     });
-    return { rows: Object.values(map), duplicates: duplicates };
+    var parsedRows = Object.values(map);
+    if (!parsedRows.length) throw new Error('O arquivo não possui produtos preenchidos na aba PRECIFIQUE 2.0.');
+    return { rows: parsedRows, duplicates: duplicates };
+  }
+  function parseProductCsv(text) {
+    var lines = String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/).filter(function (line) { return line.trim(); });
+    if (lines.length < 2) throw new Error('O arquivo não possui produtos.');
+    return parseProductMatrix(lines.map(csvCells), 0);
+  }
+  async function parseProductFile(file) {
+    if (/\.csv$/i.test(file.name || '')) return parseProductCsv(await file.text());
+    if (!window.XLSX) throw new Error('O leitor de Excel ainda não foi carregado. Atualize a página e tente novamente.');
+    var workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+    var sheetName = workbook.SheetNames.find(function (name) { return normalizeHeader(name) === 'PRECIFIQUE20'; });
+    if (!sheetName) throw new Error('A aba PRECIFIQUE 2.0 não foi encontrada.');
+    var matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: true });
+    var headerRowIndex = matrix.findIndex(function (row) {
+      var normalized = row.map(normalizeHeader);
+      return normalized.indexOf('SKU') >= 0 && normalized.some(function (header) { return header === 'CUSTOTOTAL' || header === 'CUSTO'; });
+    });
+    if (headerRowIndex < 0) throw new Error('Não foi possível localizar o cabeçalho da aba PRECIFIQUE 2.0.');
+    return parseProductMatrix(matrix, headerRowIndex);
+  }
+  function downloadCostTemplate() {
+    if (!window.XLSX) throw new Error('O gerador de Excel ainda não foi carregado. Atualize a página e tente novamente.');
+    var headers = ['SKU', 'Descrição', 'Custo Total', 'Altura (cm)', 'Largura (cm)', 'Comprimento (cm)', 'Cubagem', 'Peso (gramas)', 'Referência Frete'];
+    var rows = allSkus().map(function (item) {
+      var height = number(item.height), width = number(item.width), length = number(item.length);
+      var cubed = height * width * length / 6000;
+      var weightGrams = number(item.realWeight) * 1000;
+      return [item.sku || '', item.description || '', item.productCost == null ? '' : number(item.productCost), height || '', width || '', length || '', cubed || '', weightGrams || '', Math.max(cubed, weightGrams / 1000) || ''];
+    });
+    var sheetRows = [['', 'MATERIAIS', 'PROD. ACABADOS', 'PRECIFIQUE 2.0', '', '', '', '', ''], [], headers].concat(rows);
+    var worksheet = XLSX.utils.aoa_to_sheet(sheetRows);
+    worksheet['!cols'] = [{ wch: 20 }, { wch: 52 }, { wch: 16 }, { wch: 14 }, { wch: 15 }, { wch: 19 }, { wch: 14 }, { wch: 16 }, { wch: 18 }];
+    worksheet['!autofilter'] = { ref: 'A3:I' + Math.max(3, sheetRows.length) };
+    var workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'PRECIFIQUE 2.0');
+    XLSX.writeFile(workbook, 'MODELO_CADASTRO_DE_CUSTOS.xlsx', { bookType: 'xlsx' });
   }
 
   function bracket(weight, rows) {
@@ -368,8 +409,8 @@
   function renderCostRegistration() {
     var pendingImport = [];
     costContainer.innerHTML = '<div class="pricing-page"><section class="pricing-card pricing-hero"><div class="pricing-heading"><strong>Cadastro de Custos por SKU</strong><span>Os produtos sem custo aparecem automaticamente em vermelho para cadastro.</span></div><span class="inventory-link" id="costRegisteredCount">' + Object.keys(database.costs || {}).length + ' cadastrados · ' + (database.pendingCosts || []).length + ' pendentes</span></section>' +
-      '<section class="pricing-card pricing-import"><div class="pricing-import-head"><div><strong>Importar cadastro por planilha</strong><span>Use o modelo CSV com as colunas SKU, DESCRIÇÃO, CUSTO, ALTURA, LARGURA, COMPR. e PESO REAL.</span></div><label class="pricing-button primary" for="costCsvFile">Selecionar CSV</label><input id="costCsvFile" type="file" accept=".csv,text/csv" hidden></div>' +
-      '<div class="pricing-import-map"><span>DE → PARA</span><b>CUSTO → Custo do produto</b><b>COMPR. → Comprimento (cm)</b><b>PESO REAL (g) → Peso real (kg)</b></div>' +
+      '<section class="pricing-card pricing-import"><div class="pricing-import-head"><div><strong>Importar cadastro por planilha</strong><span>Baixe o modelo, preencha a aba PRECIFIQUE 2.0 e envie o arquivo XLSX.</span></div><div class="pricing-import-buttons"><button class="pricing-button" id="costTemplateDownload" type="button">Baixar base</button><label class="pricing-button primary" for="costCsvFile">Selecionar planilha</label></div><input id="costCsvFile" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden></div>' +
+      '<div class="pricing-import-map"><span>DE → PARA</span><b>Custo Total → Custo do produto</b><b>Comprimento (cm) → Comprimento</b><b>Peso (gramas) → Peso real (kg)</b></div>' +
       '<div id="costImportPreview" class="pricing-import-preview">Selecione o arquivo preenchido para conferir antes de importar.</div><div class="pricing-import-actions"><button class="pricing-button primary" id="costImportButton" type="button" disabled>Importar produtos</button></div><div class="pricing-status" id="costImportStatus"></div></section>' +
       '<section class="pricing-card"><form class="pricing-form" id="pricingCostForm">' +
       '<div class="pricing-field wide"><label>SKU</label><input id="costSku" required list="costSkuList" autocomplete="off" placeholder="Pesquise ou informe o SKU"><datalist id="costSkuList">' + skuOptions() + '</datalist></div>' +
@@ -401,12 +442,23 @@
     }
     ['costRealWeight','costHeight','costWidth','costLength'].forEach(function (id) { document.getElementById(id).addEventListener('input', dimensions); });
     document.getElementById('costSku').addEventListener('change', fill);
+    document.getElementById('costTemplateDownload').addEventListener('click', function () {
+      var status = document.getElementById('costImportStatus');
+      try {
+        downloadCostTemplate();
+        status.className = 'pricing-status success';
+        status.textContent = 'Modelo baixado. Preencha a aba PRECIFIQUE 2.0 e envie o mesmo arquivo aqui.';
+      } catch (error) {
+        status.className = 'pricing-status error';
+        status.textContent = error.message;
+      }
+    });
     document.getElementById('costCsvFile').addEventListener('change', async function (event) {
       var status = document.getElementById('costImportStatus');
       try {
         var file = event.target.files && event.target.files[0];
         if (!file) return;
-        var parsed = parseProductCsv(await file.text());
+        var parsed = await parseProductFile(file);
         pendingImport = parsed.rows;
         document.getElementById('costImportButton').disabled = !pendingImport.length;
         document.getElementById('costImportPreview').innerHTML = '<strong>' + pendingImport.length + ' produtos prontos para importar</strong><span>' +
@@ -430,7 +482,7 @@
         var result = await postJson('/api/pricing-database', {
           action: 'import-costs',
           rows: pendingImport,
-          responsible: document.getElementById('costResponsible').value || localStorage.getItem('pricingLastUser') || 'Importação CSV'
+          responsible: document.getElementById('costResponsible').value || localStorage.getItem('pricingLastUser') || 'Importação por planilha'
         });
         database = result;
         database.lastPricing = database.lastPricing || {};

@@ -756,6 +756,15 @@ async function handleAccountsUpdate(request, response) {
       const index = collection.findIndex((record) => record.id === String(payload.id || ''));
       if (index < 0) return sendJson(response, 404, { error: 'Titulo nao encontrado.' });
       collection.splice(index, 1);
+    } else if (payload.action === 'clear-all-accounts') {
+      const companyId = String(payload.companyId || '').trim();
+      if (companyId) {
+        state.payables = state.payables.filter((record) => record.companyId !== companyId);
+        state.receivables = state.receivables.filter((record) => record.companyId !== companyId);
+      } else {
+        state.payables = [];
+        state.receivables = [];
+      }
     } else {
       return sendJson(response, 400, { error: 'Acao financeira invalida.' });
     }

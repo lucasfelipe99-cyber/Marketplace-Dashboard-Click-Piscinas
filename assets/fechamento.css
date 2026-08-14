@@ -89,6 +89,19 @@
   background: #2ee6a8;
 }
 
+.closing-button.danger {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, .55);
+  background: rgba(127, 29, 29, .24);
+}
+
+.closing-button.danger:hover,
+.closing-button.danger:focus-visible {
+  color: #fff;
+  border-color: #f87171;
+  background: rgba(185, 28, 28, .4);
+}
+
 .closing-button:hover,
 .closing-button:focus-visible {
   border-color: #2ee6a8;

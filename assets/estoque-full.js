@@ -61,7 +61,7 @@
   }
   function companySelect() {
     var names = companyNames();
-    if (!names.length) return '<div class="full-company-warning">Cadastre e publique uma conta do Mercado Livre na Base de Vendas para liberar o envio.</div>';
+    if (!names.length) return '<label class="full-company-label">Empresa do Mercado Livre<input id="fullCompanyManual" type="text" value="' + esc(selectedCompany) + '" placeholder="Informe o nome da empresa"></label><div class="full-company-warning">Assim que a Base de Vendas for publicada, a conta passará a aparecer automaticamente.</div>';
     return '<label class="full-company-label">Empresa do Mercado Livre<select id="fullCompany">' + names.map(function (name) { return '<option value="' + esc(name) + '"' + (name === selectedCompany ? ' selected' : '') + '>' + esc(name) + '</option>'; }).join('') + '</select></label>';
   }
   function selectDatabase(account) {
@@ -287,20 +287,27 @@
   }
 
   function renderEmpty(message, type) {
-    container.innerHTML = '<div class="full-page"><section class="full-hero"><div><span class="full-eyebrow">Mercado Livre · Full</span><h2>Estoque Full</h2><p>Importe o Relatório geral de estoque do Mercado Livre para montar o dashboard.</p></div><div class="full-import">' + companySelect() + '</div></section><section class="full-empty-state ' + esc(type || '') + '"><span>FULL</span><h3>' + esc(message || (selectedCompany ? 'Nenhum relatório importado para ' + selectedCompany : 'Nenhum relatório importado')) + '</h3><p>O sistema utiliza a aba Resumo e substitui apenas os dados da empresa selecionada.</p>' + (selectedCompany ? '<label>Selecionar relatório Excel<input id="fullStockFile" type="file" accept=".xlsx,.xls"></label>' : '') + '</section></div>';
+    container.innerHTML = '<div class="full-page"><section class="full-hero"><div><span class="full-eyebrow">Mercado Livre · Full</span><h2>Estoque Full</h2><p>Importe o Relatório geral de estoque do Mercado Livre para montar o dashboard.</p></div><div class="full-import">' + companySelect() + '</div></section><section class="full-empty-state ' + esc(type || '') + '"><span>FULL</span><h3>' + esc(message || (selectedCompany ? 'Nenhum relatório importado para ' + selectedCompany : 'Nenhum relatório importado')) + '</h3><p>O sistema utiliza a aba Resumo e substitui apenas os dados da empresa selecionada.</p><label>Subir arquivo de estoque<input id="fullStockFile" type="file" accept=".xlsx,.xls"></label></section></div>';
     bind();
   }
 
   function bind() {
     var company = document.getElementById('fullCompany');
     if (company) company.addEventListener('change', function () { selectDatabase(this.value); filters = { action: '', size: '', type: '', full: '', query: '' }; pages = {}; render(); });
+    var manualCompany = document.getElementById('fullCompanyManual');
+    if (manualCompany) manualCompany.addEventListener('change', function () { selectedCompany = String(this.value || '').trim(); });
     var fileInput = document.getElementById('fullStockFile');
     if (fileInput) fileInput.addEventListener('change', async function () {
       if (!this.files || !this.files[0]) return;
+      var manual = document.getElementById('fullCompanyManual');
+      if (manual) selectedCompany = String(manual.value || '').trim();
+      if (!selectedCompany) {
+        renderEmpty('Informe o nome da empresa antes de subir o arquivo.', 'error');
+        return;
+      }
       renderEmpty('Lendo e conferindo o relatório...', 'loading');
       try {
         var parsed = await parseWorkbook(this.files[0]);
-        if (!selectedCompany) throw new Error('Selecione a empresa do Mercado Livre.');
         var response = await fetch('/api/inventory-full', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ action: 'replace', account: selectedCompany }, parsed)) });
         var result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Não foi possível salvar o relatório.');
