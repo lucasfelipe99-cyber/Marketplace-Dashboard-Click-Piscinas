@@ -255,11 +255,28 @@
     });
     var rows = [];
     var classifications = {};
+    var addDreLine = function (label, kind) {
+      var key = normalizeCashKey(label);
+      rows.push({
+        id: 'budget-dre-line-' + key.replace(/[^A-Z0-9]+/g, '-').toLowerCase().replace(/^-|-$/g, ''),
+        label: label,
+        kind: kind || 'standalone',
+        parentId: '',
+        values: Array(12).fill(0)
+      });
+    };
+    addDreLine('FATURAMENTO TOTAL');
+    addDreLine('CUSTO DE PRODUTO VENDIDO');
+    addDreLine('IMPOSTO');
+    addDreLine('DESPESAS COM MKP E SITE');
+    addDreLine('MARGEM DE CONTRIBUIÇÃO TOTAL R$', 'calculated');
+    addDreLine('MARGEM DE CONTRIBUIÇÃO TOTAL %', 'calculated-percent');
     orderedMappings.forEach(function (mapping) {
       var category = normalizeCashText(mapping[0]);
       var classification = normalizeCashText(mapping[1]);
+      var classificationOrder = Number(mapping[2]) || 0;
       var classificationKey = normalizeCashKey(classification);
-      if (!category || !classification || normalizeCashKey(category) === 'PROJETOS PATAS FIEIS') return;
+      if (!category || !classification || classificationOrder < 6 || classificationOrder > 21 || normalizeCashKey(category) === 'PROJETOS PATAS FIEIS') return;
       if (!classifications[classificationKey]) {
         var classificationId = 'budget-dre-' + classificationKey.replace(/[^A-Z0-9]+/g, '-').toLowerCase().replace(/^-|-$/g, '');
         classifications[classificationKey] = { id: classificationId, label: classification };
@@ -277,6 +294,76 @@
         parentId: parent.id,
         values: Array(12).fill(0)
       });
+    });
+    var firstVariableIndex = rows.findIndex(function (row) {
+      if (row.kind !== 'classification') return false;
+      var mapping = orderedMappings.find(function (item) { return normalizeCashKey(item[1]) === normalizeCashKey(row.label); });
+      return mapping && Number(mapping[2]) >= 17;
+    });
+    var fixedLines = [
+      { label: 'CUSTO FIXO TOTAL', kind: 'calculated' },
+      { label: 'RESULTADO OPERACIONAL R$', kind: 'calculated' },
+      { label: 'RESULTADO OPERACIONAL %', kind: 'calculated-percent' }
+    ].map(function (line) {
+      var key = normalizeCashKey(line.label);
+      return { id: 'budget-dre-line-' + key.replace(/[^A-Z0-9]+/g, '-').toLowerCase(), label: line.label, kind: line.kind, parentId: '', values: Array(12).fill(0) };
+    });
+    rows.splice(firstVariableIndex >= 0 ? firstVariableIndex : rows.length, 0, fixedLines[0], fixedLines[1], fixedLines[2]);
+    addDreLine('CUSTO VARIÁVEL TOTAL', 'calculated');
+    addDreLine('CUSTO TOTAL', 'calculated');
+    addDreLine('RESULTADO R$', 'calculated');
+    addDreLine('RESULTADO %', 'calculated-percent');
+    addDreLine('MARGEM PARA O PONTO DE EQUILÍBRIO', 'calculated-percent');
+    return rows;
+  }
+
+  function calculateBudgetDreRows(rows) {
+    var rowByKey = {};
+    var classificationsById = {};
+    rows.forEach(function (row) {
+      rowByKey[normalizeCashKey(row.label)] = row;
+      if (row.kind === 'classification') classificationsById[row.id] = row;
+    });
+    Object.keys(classificationsById).forEach(function (id) {
+      classificationsById[id].values = Array.from({ length: 12 }, function (_, monthIndex) {
+        return sum(rows.filter(function (row) { return row.kind === 'category' && row.parentId === id; }).map(function (row) {
+          return Number((row.values || [])[monthIndex]) || 0;
+        }));
+      });
+    });
+    var value = function (label, monthIndex) {
+      var row = rowByKey[normalizeCashKey(label)];
+      return row ? Number((row.values || [])[monthIndex]) || 0 : 0;
+    };
+    var classificationTotal = function (minimumOrder, maximumOrder, monthIndex) {
+      return sum(rows.filter(function (row) {
+        if (row.kind !== 'classification') return false;
+        var mapping = mappings.find(function (item) { return normalizeCashKey(item[1]) === normalizeCashKey(row.label); });
+        var order = mapping ? Number(mapping[2]) : 0;
+        return order >= minimumOrder && order <= maximumOrder;
+      }).map(function (row) { return Number((row.values || [])[monthIndex]) || 0; }));
+    };
+    Array.from({ length: 12 }, function (_, monthIndex) {
+      var revenue = value('FATURAMENTO TOTAL', monthIndex);
+      var contribution = revenue + value('CUSTO DE PRODUTO VENDIDO', monthIndex) + value('IMPOSTO', monthIndex) + value('DESPESAS COM MKP E SITE', monthIndex);
+      var fixed = classificationTotal(6, 16, monthIndex);
+      var variable = classificationTotal(17, 21, monthIndex);
+      var operating = contribution + fixed;
+      var result = operating + variable;
+      var set = function (label, amount) {
+        var row = rowByKey[normalizeCashKey(label)];
+        if (row) row.values[monthIndex] = amount;
+      };
+      set('MARGEM DE CONTRIBUIÇÃO TOTAL R$', contribution);
+      set('MARGEM DE CONTRIBUIÇÃO TOTAL %', revenue ? contribution / revenue : 0);
+      set('CUSTO FIXO TOTAL', fixed);
+      set('RESULTADO OPERACIONAL R$', operating);
+      set('RESULTADO OPERACIONAL %', revenue ? operating / revenue : 0);
+      set('CUSTO VARIÁVEL TOTAL', variable);
+      set('CUSTO TOTAL', fixed + variable);
+      set('RESULTADO R$', result);
+      set('RESULTADO %', revenue ? result / revenue : 0);
+      set('MARGEM PARA O PONTO DE EQUILÍBRIO', revenue ? Math.abs(fixed + variable) / revenue : 0);
     });
     return rows;
   }
@@ -316,7 +403,9 @@
     }));
     source.forEach(function (row) {
       var parentLabel = row.kind === 'category' ? existingParents[row.parentId] || '' : '';
-      if (!canonicalKeys.has(budgetStructureKey(row.kind, row.label, parentLabel))) merged.push(row);
+      var sourceId = String(row.id || '');
+      if (!canonicalKeys.has(budgetStructureKey(row.kind, row.label, parentLabel)) &&
+          (sourceId.indexOf('budget-custom-') === 0 || sourceId.indexOf('budget-copy-') === 0)) merged.push(row);
     });
     return merged;
   }
@@ -330,7 +419,7 @@
     } else {
       budgetDrafts[String(year)] = reconcileBudgetRows(budgetDrafts[String(year)]);
     }
-    return budgetDrafts[String(year)];
+    return calculateBudgetDreRows(budgetDrafts[String(year)]);
   }
 
   async function loadBudgetDatabase() {
@@ -1467,25 +1556,40 @@
     var saved = budgetDatabase.years && budgetDatabase.years[String(selectedBudgetYear)];
     var body = rows.map(function (row) {
       var total = sum(row.values || []);
+      var isCalculated = row.kind === 'calculated' || row.kind === 'calculated-percent';
+      var isPercent = row.kind === 'calculated-percent';
       var label = row.kind === 'classification'
         ? '<button class="cash-expand" type="button" aria-expanded="false" aria-label="Abrir ' +
           escapeCashHtml(row.label) + '">+</button><strong>' + escapeCashHtml(row.label) +
           '</strong><button class="budget-mini-action" type="button" data-budget-add-category="' + row.id + '">+ categoria</button>'
         : escapeCashHtml(row.label);
       var inputs = Array.from({ length: 12 }, function (_, monthIndex) {
+        var monthValue = Number(row.values[monthIndex]) || 0;
+        if (isCalculated) {
+          return '<td class="' + numberClass(monthValue) + '">' + (isPercent
+            ? new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(monthValue)
+            : money(monthValue)) + '</td>';
+        }
         return '<td><input class="budget-value-input" type="text" inputmode="decimal" aria-label="' +
           escapeCashHtml(row.label + ' ' + months[monthIndex]) + '" data-budget-row="' + row.id +
-          '" data-budget-month="' + monthIndex + '" value="' + String(Number(row.values[monthIndex]) || 0).replace('.', ',') + '"></td>';
+          '" data-budget-month="' + monthIndex + '"' + (row.kind === 'classification' ? ' disabled' : '') +
+          ' value="' + String(monthValue).replace('.', ',') + '"></td>';
       }).join('');
       var hierarchy = row.kind === 'classification'
         ? ' class="budget-editor-classification" data-cash-row="' + row.id + '"'
         : (row.kind === 'category'
           ? ' class="budget-editor-category cash-hidden" data-cash-parent="' + row.parentId + '"'
-          : ' class="budget-editor-standalone"');
+          : ' class="budget-editor-standalone' + (isCalculated ? ' total-row' : '') + '"');
       return '<tr' + hierarchy + '><td>' + label + '</td>' + inputs +
-        '<td class="' + numberClass(total) + '" data-budget-total="' + row.id + '">' + money(total) + '</td></tr>';
+        '<td class="' + numberClass(total) + '" data-budget-total="' + row.id + '">' + (isPercent
+          ? new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(row.values[row.values.length - 1] || 0)
+          : money(total)) + '</td></tr>';
     }).join('');
-    var header = '<tr><th>Classificação / Categoria</th>' + months.map(function (month) { return '<th>' + month + '</th>'; }).join('') + '<th>TOTAL</th></tr>';
+    var header = '<tr><th>Linha DRE / Classificação / Categoria</th>' + months.map(function (month) { return '<th>' + month + '</th>'; }).join('') + '<th>TOTAL</th></tr>';
+    var annualValue = function (label) {
+      var annualRow = rows.find(function (item) { return normalizeCashKey(item.label) === normalizeCashKey(label); });
+      return annualRow ? sum(annualRow.values || []) : 0;
+    };
     var status = saved
       ? 'Salvo em ' + new Date(saved.updatedAt).toLocaleString('pt-BR')
       : 'Novo orçamento · ainda não salvo';
@@ -1495,7 +1599,11 @@
         '<button class="closing-button" id="budgetCopyPrevious" type="button">Copiar ano anterior</button>' +
         '<button class="closing-button" id="budgetAddClassification" type="button">Nova classificação</button>' +
         '<button class="closing-button primary" id="budgetSaveYear" type="button">Salvar orçamento</button>') +
-      '<div class="closing-card"><div class="closing-card-head"><h3>Orçamento anual · ' + selectedBudgetYear +
+      kpis([['Faturamento Total', annualValue('FATURAMENTO TOTAL')],
+        ['Margem de contribuição Total', annualValue('MARGEM DE CONTRIBUIÇÃO TOTAL R$')],
+        ['Resultado operacional Total', annualValue('RESULTADO OPERACIONAL R$')],
+        ['Resultado Total', annualValue('RESULTADO R$')]]) +
+      '<div class="closing-card"><div class="closing-card-head"><h3>Estrutura DRE orçada · ' + selectedBudgetYear +
       '</h3><span class="closing-pill" id="budgetSaveStatus">' + escapeCashHtml(status) +
       '</span></div><div class="closing-table-wrap"><table class="closing-table budget-editor-table"><thead>' + header +
       '</thead><tbody>' + body + '</tbody></table></div></div></div>';
@@ -1515,6 +1623,8 @@
           totalCell.className = numberClass(total);
           totalCell.textContent = money(total);
         }
+        calculateBudgetDreRows(rows);
+        renderBudgetEditor(selectedBudgetYear);
         document.getElementById('budgetSaveStatus').textContent = 'Alterações não salvas';
       });
     });
@@ -1584,12 +1694,15 @@
   }
 
   var selectedBudgetMonth = 1;
+  var selectedBudgetComparisonMonth = 2;
 
   function renderBudget(selectedMonth, selectedYear) {
     var budgetYear = Number(selectedYear) || selectedBudgetYear;
     selectedBudgetYear = budgetYear;
     var month = Math.min(12, Math.max(1, Number(selectedMonth) || 1));
     selectedBudgetMonth = month;
+    var comparisonMonth = Math.min(12, Math.max(1, Number(selectedBudgetComparisonMonth) || (month === 1 ? 2 : month - 1)));
+    if (comparisonMonth === month) comparisonMonth = month === 1 ? 2 : month - 1;
     var details = getBudgetRows(budgetYear);
     var classificationKeys = new Set(mappings.map(function (mapping) {
       return normalizeCashKey(mapping[1]);
@@ -1604,7 +1717,13 @@
     var classificationIndex = 0;
     var rows = details.map(function (row) {
       var budget = Number((row.values || [])[month - 1]) || 0;
-      var actual = getCashActualForBudgetLine(row.label, month, budgetYear);
+      var usesDreCalculation = row.kind === 'standalone' || row.kind === 'calculated' || row.kind === 'calculated-percent';
+      var actual = usesDreCalculation
+        ? getDreActual(row.label, month, budgetYear)
+        : getCashActualForBudgetLine(row.label, month, budgetYear);
+      var comparisonActual = usesDreCalculation
+        ? getDreActual(row.label, comparisonMonth, budgetYear)
+        : getCashActualForBudgetLine(row.label, comparisonMonth, budgetYear);
       var key = normalizeCashKey(row.label);
       var isClassification = row.kind ? row.kind === 'classification' : classificationKeys.has(key);
       var isStandalone = row.kind ? row.kind === 'standalone' : standaloneKeys.has(key);
@@ -1619,8 +1738,12 @@
       return {
         label: row.label,
         actual: actual,
+        comparisonActual: comparisonActual,
         budget: budget,
-        kind: isClassification ? 'classification' : (currentClassification ? 'category' : 'standalone'),
+        isPercent: row.kind === 'calculated-percent',
+        kind: row.kind === 'calculated' || row.kind === 'calculated-percent'
+          ? row.kind
+          : (isClassification ? 'classification' : (currentClassification ? 'category' : 'standalone')),
         rowId: isClassification ? currentClassification : '',
         parentId: !isClassification && currentClassification ? currentClassification : '',
         comment: row.comment || ''
@@ -1628,6 +1751,7 @@
     });
     var body = rows.map(function (r) {
       var variance = r.actual - r.budget;
+      var monthVariance = r.actual - r.comparisonActual;
       var percent = r.budget ? variance / Math.abs(r.budget) : null;
       var favorable = variance > 0;
       var status = Math.abs(percent || 0) <= .05 ? 'neutral' : favorable ? 'good' : 'bad';
@@ -1640,26 +1764,38 @@
         ? '<button type="button" class="cash-expand" aria-expanded="false" aria-label="Abrir ' +
           escapeCashHtml(r.label) + '">+</button><strong>' + escapeCashHtml(r.label) + '</strong>'
         : (r.parentId ? '<span class="budget-category-label">' + escapeCashHtml(r.label) + '</span>' : escapeCashHtml(r.label));
-      var rowClass = r.parentId ? '' : ' class="budget-' + r.kind + (r.rowId ? ' total-row' : '') + '"';
+      var rowClass = r.parentId ? '' : ' class="budget-' + r.kind + (r.rowId || r.kind.indexOf('calculated') === 0 ? ' total-row' : '') + '"';
+      var displayValue = function (value) {
+        return r.isPercent
+          ? new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(value || 0)
+          : money(value);
+      };
       return '<tr' + rowClass + hierarchyAttributes + '><td>' + hierarchyLabel + '</td><td>' +
-        numericButton(r.label, month, r.actual, 'orcamento') + '</td><td>' + money(r.budget) +
-        '</td><td class="' + numberClass(variance) + '">' + money(variance) + '</td><td>' +
+        (r.isPercent ? displayValue(r.actual) : numericButton(r.label, month, r.actual, 'orcamento')) + '</td><td>' + displayValue(r.budget) +
+        '</td><td class="' + numberClass(variance) + '">' + displayValue(variance) + '</td><td>' +
         (percent == null ? '–' : new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(percent)) +
         '</td><td>' + (r.budget ? new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(r.actual / r.budget) : '–') +
+        '</td><td>' + displayValue(r.comparisonActual) + '</td><td class="' + numberClass(monthVariance) + '">' + displayValue(monthVariance) +
         '</td><td><span class="closing-status ' + status + '">' + label + '</span></td><td><input class="closing-input budget-comment" data-line="' +
         encodeURIComponent(r.label) + '" value="' + escapeCashHtml(comment) + '" placeholder="Adicionar comentário"></td></tr>';
     }).join('');
     var monthOptions = Array.from({ length: 12 }, function (_, index) { return index + 1; }).map(function (item) {
       return '<option value="' + item + '"' + (item === month ? ' selected' : '') + '>' + budgetState.months[item - 1] + '</option>';
     }).join('');
+    var comparisonMonthOptions = Array.from({ length: 12 }, function (_, index) { return index + 1; }).map(function (item) {
+      return '<option value="' + item + '"' + (item === comparisonMonth ? ' selected' : '') + '>' + budgetState.months[item - 1] + '</option>';
+    }).join('');
     document.getElementById('budgetContainer').innerHTML = '<div class="closing-shell">' +
       head('Orçado x Realizado', 'Visão mensal por classificação e categoria; realizado recalculado pelo Fluxo de Caixa.',
         '<label>Ano <select class="closing-select" id="budgetCompareYear">' + budgetYearOptions(budgetYear) + '</select></label>' +
-        '<select class="closing-select" id="budgetMonth">' + monthOptions + '</select>') +
+        '<label>Mês realizado <select class="closing-select" id="budgetMonth">' + monthOptions + '</select></label>' +
+        '<label>Comparar realizado com <select class="closing-select" id="budgetActualComparisonMonth">' + comparisonMonthOptions + '</select></label>') +
       '<div class="closing-card"><div class="closing-card-head"><h3>Comparativo mensal · ' + budgetState.months[month - 1] +
       '</h3><span class="closing-pill">' +
       (budgetDatabase.years[String(budgetYear)] ? 'Orçamento salvo no sistema' : 'Orçamento ainda não salvo') +
-      '</span></div><div class="closing-table-wrap"><table class="closing-table"><thead><tr><th>Classificação / Categoria</th><th>Realizado</th><th>Orçado</th><th>Variação R$</th><th>Variação %</th><th>Atingimento</th><th>Status</th><th>Comentário</th></tr></thead><tbody>' + body + '</tbody></table></div></div></div>';
+      '</span></div><div class="closing-table-wrap"><table class="closing-table"><thead><tr><th>Linha DRE / Classificação / Categoria</th><th>Realizado ' +
+      budgetState.months[month - 1] + '</th><th>Orçado ' + budgetState.months[month - 1] + '</th><th>Variação R$</th><th>Variação %</th><th>Atingimento</th><th>Realizado ' +
+      budgetState.months[comparisonMonth - 1] + '</th><th>Variação entre meses</th><th>Status</th><th>Comentário</th></tr></thead><tbody>' + body + '</tbody></table></div></div></div>';
     Array.from(document.querySelectorAll('.budget-comment')).forEach(function (input) {
       input.addEventListener('change', function () {
         var label = decodeURIComponent(input.dataset.line);
@@ -1670,6 +1806,11 @@
     });
     var selector = document.getElementById('budgetMonth');
     if (selector) selector.addEventListener('change', function () { renderBudget(selector.value, budgetYear); });
+    var comparisonSelector = document.getElementById('budgetActualComparisonMonth');
+    if (comparisonSelector) comparisonSelector.addEventListener('change', function () {
+      selectedBudgetComparisonMonth = Number(comparisonSelector.value);
+      renderBudget(month, budgetYear);
+    });
     var yearSelector = document.getElementById('budgetCompareYear');
     if (yearSelector) yearSelector.addEventListener('change', function () { renderBudget(month, Number(yearSelector.value)); });
     bindCashExpandButtons(document.getElementById('budgetContainer'));
