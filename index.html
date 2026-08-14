@@ -4591,7 +4591,7 @@
 
 </style>
   <link rel="stylesheet" href="/assets/fechamento.css?v=9">
-  <link rel="stylesheet" href="/assets/vendas-upload.css?v=2-20260729">
+  <link rel="stylesheet" href="/assets/vendas-upload.css?v=5-20260814-ads-collapsible-months">
 </head>
 <body>
   <main class="page">
@@ -4707,11 +4707,11 @@
           <button class="tab-button" type="button" data-tab="financialConfigPanel"><span class="nav-icon" aria-hidden="true">⚙</span><span class="nav-label">Configurações Financeiras</span></button>
         </div>
 
-        <button class="sidebar-section-toggle" type="button" aria-expanded="true" aria-controls="inventoryNavItems">
+        <button class="sidebar-section-toggle" type="button" aria-expanded="false" aria-controls="inventoryNavItems">
           <span class="sidebar-section-icon" aria-hidden="true">›</span>
           <span class="nav-label">Estoque</span>
         </button>
-        <div class="nav-section-items" id="inventoryNavItems">
+        <div class="nav-section-items" id="inventoryNavItems" hidden>
           <button class="tab-button" type="button" data-tab="inventoryEntriesPanel"><span class="nav-icon" aria-hidden="true">E</span><span class="nav-label">Entradas de Estoque</span></button>
           <button class="tab-button" type="button" data-tab="inventoryAveragePanel"><span class="nav-icon" aria-hidden="true">C</span><span class="nav-label">Custo Médio</span></button>
           <button class="tab-button" type="button" data-tab="inventoryFullPanel"><span class="nav-icon" aria-hidden="true">F</span><span class="nav-label">Estoque Full</span></button>
@@ -5131,7 +5131,20 @@
       configurationNavToggle.querySelector('.nav-label').textContent = 'Configuração 🔓';
     }
 
+    function closeOtherSidebarSections(activeToggle) {
+      document.querySelectorAll('.sidebar-section-toggle').forEach(function (sectionToggle) {
+        if (sectionToggle === activeToggle) return;
+        sectionToggle.setAttribute('aria-expanded', 'false');
+        const sectionItems = document.getElementById(sectionToggle.getAttribute('aria-controls'));
+        if (sectionItems) sectionItems.hidden = true;
+      });
+    }
+
     document.querySelectorAll('.sidebar-section-toggle').forEach(function (toggle) {
+      const initialTarget = document.getElementById(toggle.getAttribute('aria-controls'));
+      toggle.setAttribute('aria-expanded', 'false');
+      if (initialTarget) initialTarget.hidden = true;
+
       toggle.addEventListener('click', function () {
         if (toggle === configurationNavToggle && sessionStorage.getItem('configurationUnlocked') !== 'true') {
           openConfigurationAccess();
@@ -5140,6 +5153,7 @@
         const target = document.getElementById(toggle.getAttribute('aria-controls'));
         const opening = toggle.getAttribute('aria-expanded') !== 'true';
 
+        if (opening) closeOtherSidebarSections(toggle);
         toggle.setAttribute('aria-expanded', String(opening));
         if (target) {
           target.hidden = !opening;
@@ -5764,7 +5778,20 @@
       Verifica se a extensão do arquivo está entre os formatos aceitos.
     */
     async function loadPublishedBase(month) {
-      const activeMonth = month || dashboardState.activeMonth;
+      let activeMonth = month || dashboardState.activeMonth;
+
+      if (!month && Object.keys(dashboardState.monthMetadata).length === 0) {
+        await loadPublishedMetadata();
+        if (!dashboardState.monthMetadata[activeMonth]) {
+          const publishedMonths = Object.keys(dashboardState.monthMetadata)
+            .filter(function (value) { return dashboardState.monthMetadata[value] && dashboardState.monthMetadata[value].exists; })
+            .sort(function (left, right) { return Number(left) - Number(right); });
+          if (publishedMonths.length) {
+            activeMonth = publishedMonths[publishedMonths.length - 1];
+          }
+        }
+      }
+
       dashboardState.activeMonth = activeMonth;
       renderMonthTabs();
 
@@ -6100,6 +6127,7 @@
         }
         sessionStorage.setItem('configurationUnlocked', 'true');
         configurationNavToggle.querySelector('.nav-label').textContent = 'Configuração 🔓';
+        closeOtherSidebarSections(configurationNavToggle);
         configurationNavToggle.setAttribute('aria-expanded', 'true');
         configurationNavItems.hidden = false;
         closeConfigurationAccess();
@@ -14105,7 +14133,7 @@
   <link rel="stylesheet" href="/assets/product-master.css?v=2">
   <script src="/assets/product-master.js?v=5"></script>
   <script src="/assets/fechamento.js?v=33-20260730"></script>
-  <script src="/assets/ads-upload.js?v=4"></script>
+  <script src="/assets/ads-upload.js?v=10-20260814-ads-collapsible-months"></script>
   <link rel="stylesheet" href="/assets/contas.css?v=5">
   <script src="/assets/contas.js?v=6"></script>
   <link rel="stylesheet" href="/assets/estoque.css?v=1">

@@ -50,6 +50,9 @@ const productMasterPath = path.join(dataDir, 'product-master.json');
 const inventoryPath = path.join(dataDir, 'inventory.json');
 const inventoryFullPath = path.join(dataDir, 'inventory-full.json');
 const salesTreatersPath = path.join(dataDir, 'sales-treaters.json');
+const adsUploadHistoryPath = path.join(dataDir, 'ads-upload-history.json');
+const adsUploadFilesDir = path.join(dataDir, 'ads-upload-files');
+const adsTreatedFilesDir = path.join(dataDir, 'ads-treated-files');
 const freightAgreementsPath = path.join(dataDir, 'freight-agreements.json');
 const pricingRulesPath = path.join(dataDir, 'pricing-rules.json');
 const pricingDatabasePath = path.join(dataDir, 'pricing-database.json');
@@ -101,6 +104,8 @@ const mimeTypes = {
 };
 
 fs.mkdirSync(dataDir, { recursive: true });
+fs.mkdirSync(adsUploadFilesDir, { recursive: true });
+fs.mkdirSync(adsTreatedFilesDir, { recursive: true });
 
 function resolveDataDirectory(baseDir) {
   if (process.env.DATA_DIR) {
@@ -992,10 +997,12 @@ async function handleRowsUpload(request, response) {
   const rowsName = createStoredName(area, 'rows', month, '.json');
   const rowsPath = path.join(dataDir, rowsName);
   const stagingPath = createUploadStagingPath('.json');
+  const previousRowsPath = monthMetadata.rowsName ? resolveDataFilePath(monthMetadata.rowsName) : '';
 
   try {
     await streamRequestToFile(request, stagingPath, maxUploadBytes);
     applyProductCategoriesToRowsFile(stagingPath);
+    const preservedAdsRows = preserveAdsMetricsBetweenRowsFiles(previousRowsPath, stagingPath);
     persistStagedFile(stagingPath, rowsPath);
     monthMetadata.rowsName = rowsName;
     monthMetadata.rowsUpdatedAt = new Date().toISOString();
@@ -1003,7 +1010,7 @@ async function handleRowsUpload(request, response) {
     metadata.areas.area1.months[month] = monthMetadata;
     writeJsonWithRetry(metadataPath, metadata);
     deletePreviousBases(area, month, [monthMetadata.storedName, rowsName]);
-    sendJson(response, 200, getPublishedMetadata(month));
+    sendJson(response, 200, { ...getPublishedMetadata(month), preservedAdsRows });
     setImmediate(() => {
       ensureIntelligentAnalysis(true).catch((error) => {
         console.error('Nao foi possivel atualizar a Analise Inteligente apos a publicacao:', error.message);
@@ -1150,10 +1157,79 @@ function isAdsMetricRow(row, indexes) {
     (category === '03.despesas marketplace' && subcategory === 'publicidade');
 }
 
+function preserveAdsMetricsBetweenRowsFiles(previousRowsPath, nextRowsPath) {
+  if (!previousRowsPath || !nextRowsPath || !fs.existsSync(previousRowsPath) || !fs.existsSync(nextRowsPath)) return 0;
+  const previous = JSON.parse(fs.readFileSync(previousRowsPath, 'utf8'));
+  const next = JSON.parse(fs.readFileSync(nextRowsPath, 'utf8'));
+  const previousRows = Array.isArray(previous.rows) ? previous.rows : [];
+  const nextRows = Array.isArray(next.rows) ? next.rows : [];
+  if (previousRows.length < 2 || !Array.isArray(previousRows[0]) || !nextRows.length || !Array.isArray(nextRows[0])) return 0;
+
+  const locate = (header, aliases, partial) => {
+    const normalized = header.map(normalizeAdsText);
+    let index = normalized.findIndex((name) => aliases.includes(name));
+    if (index < 0 && partial) index = normalized.findIndex((name) => name.startsWith(partial));
+    return index;
+  };
+  const oldHeader = previousRows[0];
+  const newHeader = nextRows[0];
+  const oldIndexes = {
+    marketplace: locate(oldHeader, ['marketplace']), sale: locate(oldHeader, ['marketplace venda']),
+    ad: locate(oldHeader, ['id anuncio'], 'id an'), date: locate(oldHeader, ['data']),
+    category: locate(oldHeader, ['categoria']), subcategory: locate(oldHeader, ['sub categoria', 'subcategoria'])
+  };
+  const newIndexes = {
+    marketplace: locate(newHeader, ['marketplace']), sale: locate(newHeader, ['marketplace venda']),
+    ad: locate(newHeader, ['id anuncio'], 'id an'), date: locate(newHeader, ['data']),
+    category: locate(newHeader, ['categoria']), subcategory: locate(newHeader, ['sub categoria', 'subcategoria'])
+  };
+  if ([oldIndexes.category, oldIndexes.subcategory, newIndexes.category, newIndexes.subcategory].some((index) => index < 0)) return 0;
+
+  const mappedAdsRows = previousRows.slice(1).filter((row) => isAdsMetricRow(row, oldIndexes)).map((oldRow) => {
+    if (oldHeader.length === newHeader.length && oldHeader.every((name, index) => normalizeAdsText(name) === normalizeAdsText(newHeader[index]))) {
+      return oldRow.slice();
+    }
+    const mapped = new Array(newHeader.length).fill('');
+    newHeader.forEach((name, targetIndex) => {
+      const sourceIndex = oldHeader.findIndex((oldName) => normalizeAdsText(oldName) === normalizeAdsText(name));
+      if (sourceIndex >= 0) mapped[targetIndex] = oldRow[sourceIndex];
+    });
+    return mapped;
+  });
+  if (!mappedAdsRows.length) return 0;
+
+  const metricKey = (row, indexes) => [
+    indexes.marketplace >= 0 ? normalizeAdsText(row[indexes.marketplace]) : '',
+    indexes.sale >= 0 ? normalizeAdsText(row[indexes.sale]) : '',
+    indexes.ad >= 0 ? normalizeAdsText(row[indexes.ad]) : '',
+    indexes.date >= 0 ? adsDateKey(row[indexes.date]) : '',
+    normalizeAdsText(row[indexes.category]), normalizeAdsText(row[indexes.subcategory])
+  ].join('||');
+  const existingKeys = new Set(nextRows.slice(1).filter((row) => isAdsMetricRow(row, newIndexes)).map((row) => metricKey(row, newIndexes)));
+  const carried = mappedAdsRows.filter((row) => {
+    const key = metricKey(row, newIndexes);
+    if (existingKeys.has(key)) return false;
+    existingKeys.add(key);
+    return true;
+  });
+  if (!carried.length) return 0;
+  next.rows = nextRows.concat(carried);
+  writeJsonWithRetry(nextRowsPath, next);
+  return carried.length;
+}
+
 function getRegisteredMarketplaceAccounts() {
   const metadata = readMetadata();
   const months = metadata.areas && metadata.areas.area1 && metadata.areas.area1.months || {};
   const accounts = new Map();
+  const salesTreaters = readSalesTreaters();
+  salesTreaters.channels.forEach((channel) => {
+    const marketplace = String(channel.marketplace || '').trim();
+    const account = String(channel.channelName || '').trim();
+    if (!marketplace || !account) return;
+    const key = normalizeAdsText(marketplace) + '||' + normalizeAdsText(account);
+    accounts.set(key, { marketplace, account, source: 'sales-treater' });
+  });
   Object.values(months).forEach((month) => {
     if (!month || !month.rowsName) return;
     const rowsPath = resolveDataFilePath(month.rowsName);
@@ -1176,7 +1252,7 @@ function getRegisteredMarketplaceAccounts() {
         const account = String(row[indexes.sale] || '').trim();
         if (!marketplace || !account || isAdsMetricRow(row, indexes)) return;
         const key = normalizeAdsText(marketplace) + '||' + normalizeAdsText(account);
-        if (!accounts.has(key)) accounts.set(key, { marketplace, account });
+        if (!accounts.has(key)) accounts.set(key, { marketplace, account, source: 'sales-base' });
       });
     } catch (error) {
       console.warn('Não foi possível ler contas de', month.rowsName, error.message);
@@ -1224,13 +1300,17 @@ async function handleAdsBaseUpload(request, response) {
       return;
     }
     const header = savedRows[0].map((value) => String(value == null ? '' : value).trim());
-    const headerIndex = (aliases) => header.findIndex((name) => aliases.includes(normalizeAdsText(name)));
+    const headerIndex = (aliases, partial) => {
+      let index = header.findIndex((name) => aliases.includes(normalizeAdsText(name)));
+      if (index < 0 && partial) index = header.findIndex((name) => normalizeAdsText(name).startsWith(partial));
+      return index;
+    };
     const indexes = {
       marketplace: headerIndex(['marketplace']), sale: headerIndex(['marketplace venda']),
-      sku: headerIndex(['sku']), ad: headerIndex(['id anuncio']), date: headerIndex(['data']),
+      sku: headerIndex(['sku']), ad: headerIndex(['id anuncio'], 'id an'), date: headerIndex(['data']),
       category: headerIndex(['categoria']), subcategory: headerIndex(['sub categoria', 'subcategoria']),
       value: headerIndex(['valor', 'valor completo']), tag: headerIndex(['tag']),
-      description: headerIndex(['descricao']), category2: headerIndex(['categoria2']),
+      description: headerIndex(['descricao'], 'descri'), category2: headerIndex(['categoria2']),
       datatype: headerIndex(['datatype']), recordDate: headerIndex(['record date']), fullDate: headerIndex(['full data'])
     };
     const requiredIndexes = ['marketplace', 'sale', 'sku', 'date', 'category', 'subcategory', 'value', 'datatype'];
@@ -1251,23 +1331,33 @@ async function handleAdsBaseUpload(request, response) {
     }
 
     const skuData = new Map();
+    const adData = new Map();
     savedRows.slice(1).forEach((row) => {
       const sku = normalizeAdsText(row[indexes.sku]);
-      if (!sku) return;
-      const current = skuData.get(sku) || { description: '', category2: '' };
+      const ad = indexes.ad >= 0 ? normalizeAdsText(row[indexes.ad]) : '';
+      const sale = indexes.sale >= 0 ? normalizeAdsText(row[indexes.sale]) : '';
+      if (!sku && !ad) return;
+      const current = skuData.get(sku) || { sku: String(row[indexes.sku] || '').trim(), description: '', category2: '' };
       if (indexes.description >= 0 && !current.description) current.description = String(row[indexes.description] || '').trim();
       if (indexes.category2 >= 0 && !current.category2) current.category2 = String(row[indexes.category2] || '').trim();
-      skuData.set(sku, current);
+      if (sku) skuData.set(sku, current);
+      if (ad && sale) {
+        const adKey = sale + '||' + ad;
+        const knownAd = adData.get(adKey) || { sku: current.sku || '', description: '', category2: '' };
+        if (!knownAd.sku && current.sku) knownAd.sku = current.sku;
+        if (!knownAd.description && current.description) knownAd.description = current.description;
+        if (!knownAd.category2 && current.category2) knownAd.category2 = current.category2;
+        adData.set(adKey, knownAd);
+      }
     });
 
     const uniqueIncomingRows = [];
-    const incomingKeys = new Set();
+    const incomingIndexes = new Map();
     incomingRows.forEach((row) => {
-      const key = [platformKey, normalizeAdsText(account), normalizeAdsText(row.sku), normalizeAdsText(row.ad),
-        adsDateKey(row.date), normalizeAdsText(row.category), normalizeAdsText(row.subcategory), Number(row.value) || 0].join('||');
-      if (incomingKeys.has(key)) return;
-      incomingKeys.add(key);
-      uniqueIncomingRows.push(row);
+      const key = [platformKey, normalizeAdsText(account), normalizeAdsText(row.ad), adsDateKey(row.date),
+        normalizeAdsText(row.category), normalizeAdsText(row.subcategory)].join('||');
+      if (incomingIndexes.has(key)) uniqueIncomingRows[incomingIndexes.get(key)] = row;
+      else { incomingIndexes.set(key, uniqueIncomingRows.length); uniqueIncomingRows.push(row); }
     });
     const dates = new Set(uniqueIncomingRows.map((row) => adsDateKey(row.date)).filter(Boolean));
     if (!dates.size) {
@@ -1279,26 +1369,34 @@ async function handleAdsBaseUpload(request, response) {
       sendJson(response, 400, { error: 'O arquivo possui datas fora do mês selecionado. Escolha o mês correto antes de publicar.' });
       return;
     }
-    const keptRows = [];
+    // ADS complementa a Base de Vendas. Nunca removemos linhas de venda nem
+    // métricas de outros dias: somente substituímos a mesma métrica do mesmo
+    // anúncio, conta e data para permitir a republicação sem duplicidade.
+    const keptRows = savedRows.slice(1);
     let replaced = 0;
-    savedRows.slice(1).forEach((row) => {
-      const samePlatform = normalizeAdsText(row[indexes.marketplace]) === platformKey;
-      const sameAccount = normalizeAdsText(row[indexes.sale]) === normalizeAdsText(account);
-      const actual = normalizeAdsText(row[indexes.datatype]) !== 'forecast';
-      if (samePlatform && sameAccount && actual && isAdsMetricRow(row, indexes)) replaced += 1;
-      else keptRows.push(row);
-    });
+    const incomingMetricKeys = new Set(uniqueIncomingRows.map((source) => [platformKey, normalizeAdsText(account),
+      normalizeAdsText(source.ad), adsDateKey(source.date), normalizeAdsText(source.category), normalizeAdsText(source.subcategory)].join('||')));
+    for (let index = keptRows.length - 1; index >= 0; index -= 1) {
+      const row = keptRows[index];
+      if (!isAdsMetricRow(row, indexes)) continue;
+      const key = [normalizeAdsText(row[indexes.marketplace]), normalizeAdsText(row[indexes.sale]),
+        indexes.ad >= 0 ? normalizeAdsText(row[indexes.ad]) : '', adsDateKey(row[indexes.date]),
+        normalizeAdsText(row[indexes.category]), normalizeAdsText(row[indexes.subcategory])].join('||');
+      if (incomingMetricKeys.has(key)) { keptRows.splice(index, 1); replaced += 1; }
+    }
 
     const now = new Date().toISOString();
     const addedRows = uniqueIncomingRows.map((source) => {
       const row = new Array(header.length).fill('');
       const date = adsDateKey(source.date);
-      const sku = String(source.sku || '').trim();
-      const known = skuData.get(normalizeAdsText(sku)) || {};
+      const sourceAd = String(source.ad || '').trim();
+      const knownByAd = adData.get(normalizeAdsText(account) + '||' + normalizeAdsText(sourceAd)) || {};
+      const sku = String(source.sku || knownByAd.sku || '').trim();
+      const known = skuData.get(normalizeAdsText(sku)) || knownByAd;
       row[indexes.marketplace] = platform;
       if (indexes.sale >= 0) row[indexes.sale] = account;
       row[indexes.sku] = sku;
-      if (indexes.ad >= 0) row[indexes.ad] = String(source.ad || '').trim();
+      if (indexes.ad >= 0) row[indexes.ad] = sourceAd;
       row[indexes.date] = date;
       row[indexes.category] = String(source.category || '').trim();
       row[indexes.subcategory] = String(source.subcategory || '').trim();
@@ -1316,12 +1414,156 @@ async function handleAdsBaseUpload(request, response) {
     writeJsonWithRetry(rowsPath, saved);
     monthMetadata.rowsUpdatedAt = now;
     writeJsonWithRetry(metadataPath, metadata);
+    if (payload.uploadId) {
+      const history = readAdsUploadHistory();
+      const upload = history.uploads.find((item) => item.id === String(payload.uploadId));
+      if (upload) {
+        upload.addedToBaseAt = now;
+        history.updatedAt = now;
+        writeJsonWithRetry(adsUploadHistoryPath, history);
+      }
+    }
     sendJson(response, 200, { added: addedRows.length, replaced, duplicatesRemoved: incomingRows.length - uniqueIncomingRows.length, platform, account, month });
     setImmediate(() => ensureIntelligentAnalysis(true).catch(() => {}));
   } catch (error) {
     console.error('Erro ao publicar base de ADS:', error);
     const status = error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 500;
     sendJson(response, status, { error: status === 413 ? 'Arquivo de ADS acima do limite permitido.' : (error.message || 'Erro ao publicar base de ADS.') });
+  }
+}
+
+function readAdsUploadHistory() {
+  if (!fs.existsSync(adsUploadHistoryPath)) return { version: 1, uploads: [], counters: {}, updatedAt: null };
+  try {
+    const state = JSON.parse(fs.readFileSync(adsUploadHistoryPath, 'utf8'));
+    return { version: 1, uploads: Array.isArray(state.uploads) ? state.uploads : [], counters: state.counters && typeof state.counters === 'object' ? state.counters : {}, updatedAt: state.updatedAt || null };
+  } catch (error) {
+    return { version: 1, uploads: [], counters: {}, updatedAt: null };
+  }
+}
+
+function publicAdsUpload(item) {
+  return {
+    id: item.id, platform: item.platform, account: item.account, year: item.year, month: item.month,
+    day: item.day, sequence: item.sequence, fileName: item.fileName, size: item.size,
+    uploadedAt: item.uploadedAt, treatedAt: item.treatedAt || null,
+    treatedRows: Number(item.treatedRows) || 0, addedToBaseAt: item.addedToBaseAt || null,
+    status: item.addedToBaseAt ? 'published' : (item.treatedAt ? 'treated' : 'raw')
+  };
+}
+
+async function handleAdsTreaterUploads(request, response) {
+  if (request.method === 'GET') {
+    const state = readAdsUploadHistory();
+    sendJson(response, 200, { uploads: state.uploads.map(publicAdsUpload), updatedAt: state.updatedAt });
+    return;
+  }
+  if (!requireAdmin(request, response)) return;
+  try {
+    const payload = await collectJsonRequest(request, maxUploadBytes);
+    const action = String(payload.action || 'add');
+    const state = readAdsUploadHistory();
+    if (action === 'delete') {
+      const index = state.uploads.findIndex((item) => item.id === String(payload.id || ''));
+      if (index < 0) return sendJson(response, 404, { error: 'Subida de ADS não encontrada.' });
+      const removed = state.uploads.splice(index, 1)[0];
+      const filePath = path.join(adsUploadFilesDir, removed.storedName || '');
+      if (removed.storedName && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      const treatedPath = path.join(adsTreatedFilesDir, removed.treatedName || '');
+      if (removed.treatedName && fs.existsSync(treatedPath)) fs.unlinkSync(treatedPath);
+      state.updatedAt = new Date().toISOString();
+      writeJsonWithRetry(adsUploadHistoryPath, state);
+      sendJson(response, 200, { deleted: publicAdsUpload(removed), uploads: state.uploads.map(publicAdsUpload) });
+      return;
+    }
+    if (action === 'save-treated') {
+      const item = state.uploads.find((entry) => entry.id === String(payload.id || ''));
+      if (!item) return sendJson(response, 404, { error: 'Subida de ADS nÃ£o encontrada.' });
+      const rows = Array.isArray(payload.rows) ? payload.rows : [];
+      if (!rows.length) return sendJson(response, 400, { error: 'O tratamento nÃ£o gerou linhas para a Base de Dados.' });
+      const treatedName = `${item.id}.json`;
+      const treatedAt = new Date().toISOString();
+      writeJsonWithRetry(path.join(adsTreatedFilesDir, treatedName), { version: 1, uploadId: item.id, treatedAt, rows });
+      item.treatedName = treatedName;
+      item.treatedAt = treatedAt;
+      item.treatedRows = rows.length;
+      item.addedToBaseAt = null;
+      state.updatedAt = treatedAt;
+      writeJsonWithRetry(adsUploadHistoryPath, state);
+      sendJson(response, 200, { upload: publicAdsUpload(item), uploads: state.uploads.map(publicAdsUpload) });
+      return;
+    }
+    if (action === 'mark-added') {
+      const item = state.uploads.find((entry) => entry.id === String(payload.id || ''));
+      if (!item) return sendJson(response, 404, { error: 'Subida de ADS não encontrada.' });
+      item.addedToBaseAt = new Date().toISOString();
+      state.updatedAt = item.addedToBaseAt;
+      writeJsonWithRetry(adsUploadHistoryPath, state);
+      sendJson(response, 200, { upload: publicAdsUpload(item) });
+      return;
+    }
+    const platform = String(payload.platform || '').trim();
+    const account = String(payload.account || '').trim();
+    const year = Number(payload.year), month = Number(payload.month), day = Number(payload.day);
+    const fileName = path.basename(String(payload.fileName || '').trim());
+    const extension = path.extname(fileName).toLowerCase();
+    const data = String(payload.dataBase64 || '');
+    if (!platform || !account || !Number.isInteger(year) || year < 2020 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(day) || day < 1 || day > 31) {
+      return sendJson(response, 400, { error: 'Informe plataforma, conta, ano, mês e dia válidos.' });
+    }
+    const expectedDate = new Date(Date.UTC(year, month - 1, day));
+    if (expectedDate.getUTCFullYear() !== year || expectedDate.getUTCMonth() !== month - 1 || expectedDate.getUTCDate() !== day) {
+      return sendJson(response, 400, { error: 'O dia informado não existe no mês selecionado.' });
+    }
+    if (!fileName || !['.xlsx', '.xlsm', '.xls', '.csv', '.zip', '.txt'].includes(extension) || !data) {
+      return sendJson(response, 400, { error: 'Selecione um arquivo de ADS válido.' });
+    }
+    const bytes = Buffer.from(data, 'base64');
+    if (!bytes.length) return sendJson(response, 400, { error: 'O arquivo de ADS está vazio.' });
+    const counterKey = [platform, account, year, month, day].join('||');
+    const historicalHighest = state.uploads.filter((item) => item.platform === platform && item.account === account && item.year === year && item.month === month && item.day === day).reduce((highest, item) => Math.max(highest, Number(item.sequence) || 0), 0);
+    const sequence = Math.max(Number(state.counters[counterKey]) || 0, historicalHighest) + 1;
+    state.counters[counterKey] = sequence;
+    const id = crypto.randomUUID();
+    const storedName = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}-${String(sequence).padStart(3, '0')}-${id}${extension}`;
+    fs.writeFileSync(path.join(adsUploadFilesDir, storedName), bytes);
+    const now = new Date().toISOString();
+    const item = { id, platform, account, year, month, day, sequence, fileName, storedName, size: bytes.length, uploadedAt: now, treatedName: null, treatedAt: null, treatedRows: 0, addedToBaseAt: null };
+    state.uploads.push(item);
+    state.uploads.sort((a, b) => b.year - a.year || b.month - a.month || b.day - a.day || b.sequence - a.sequence);
+    state.updatedAt = now;
+    writeJsonWithRetry(adsUploadHistoryPath, state);
+    sendJson(response, 201, { upload: publicAdsUpload(item), uploads: state.uploads.map(publicAdsUpload) });
+  } catch (error) {
+    const status = error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 500;
+    sendJson(response, status, { error: status === 413 ? 'Arquivo de ADS acima do limite permitido.' : (error.message || 'Erro ao salvar arquivo de ADS.') });
+  }
+}
+
+function handleAdsTreaterFile(request, response) {
+  const url = new URL(request.url, 'http://localhost');
+  const id = String(url.searchParams.get('id') || '');
+  const item = readAdsUploadHistory().uploads.find((entry) => entry.id === id);
+  if (!item || !item.storedName) return sendJson(response, 404, { error: 'Arquivo de ADS não encontrado.' });
+  const filePath = path.join(adsUploadFilesDir, item.storedName);
+  if (!fs.existsSync(filePath)) return sendJson(response, 404, { error: 'Arquivo de ADS não encontrado no disco.' });
+  const safeName = String(item.fileName || 'ads').replace(/[\r\n"]/g, '_');
+  response.setHeader('Content-Disposition', `attachment; filename="${safeName}"`);
+  sendFile(response, filePath, mimeTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream', 'no-store');
+}
+
+function handleAdsTreaterTreated(request, response) {
+  const url = new URL(request.url, 'http://localhost');
+  const id = String(url.searchParams.get('id') || '');
+  const item = readAdsUploadHistory().uploads.find((entry) => entry.id === id);
+  if (!item || !item.treatedName) return sendJson(response, 409, { error: 'Este arquivo bruto ainda nÃ£o foi tratado.' });
+  const filePath = path.join(adsTreatedFilesDir, item.treatedName);
+  if (!fs.existsSync(filePath)) return sendJson(response, 404, { error: 'Resultado tratado nÃ£o encontrado no disco persistente.' });
+  try {
+    const result = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    sendJson(response, 200, { upload: publicAdsUpload(item), rows: Array.isArray(result.rows) ? result.rows : [] });
+  } catch (error) {
+    sendJson(response, 500, { error: 'NÃ£o foi possÃ­vel ler o resultado tratado.' });
   }
 }
 
@@ -4265,6 +4507,21 @@ const server = http.createServer((request, response) => {
 
   if (request.method === 'POST' && requestPath === '/api/ads-base') {
     handleAdsBaseUpload(request, response);
+    return;
+  }
+
+  if ((request.method === 'GET' || request.method === 'POST') && requestPath === '/api/ads-treater/uploads') {
+    handleAdsTreaterUploads(request, response);
+    return;
+  }
+
+  if (request.method === 'GET' && requestPath === '/api/ads-treater/file') {
+    handleAdsTreaterFile(request, response);
+    return;
+  }
+
+  if (request.method === 'GET' && requestPath === '/api/ads-treater/treated') {
+    handleAdsTreaterTreated(request, response);
     return;
   }
 

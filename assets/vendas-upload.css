@@ -244,3 +244,75 @@
   .sales-upload-grid { grid-template-columns: 1fr; }
   .sales-upload-heading { flex-direction: column; }
 }
+
+.ads-treater-panel { border:1px solid var(--border); border-radius:18px; background:var(--surface); padding:22px; box-shadow:var(--shadow); }
+.ads-treater-head { display:flex; justify-content:space-between; gap:18px; align-items:flex-start; }
+.ads-treater-head h2,.ads-treater-head p { margin:0; }
+.ads-treater-head h2 { margin-top:5px; font-size:1.45rem; }
+.ads-treater-head p { margin-top:7px; color:var(--text-muted); max-width:900px; line-height:1.5; }
+.ads-data-flow { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:18px; }
+.ads-data-flow span { padding:8px 12px; border:1px solid var(--border); border-radius:999px; color:var(--text-muted); background:var(--surface-soft); font-size:.76rem; font-weight:850; }
+.ads-data-flow span.active { color:#fff; border-color:var(--accent); background:rgba(79,140,255,.18); }
+.ads-data-flow b { color:var(--accent); }
+.ads-treater-controls { display:grid; grid-template-columns:1fr 1.2fr .65fr .65fr .55fr 1.4fr auto; gap:10px; align-items:end; margin-top:20px; }
+.ads-treater-controls label,.ads-treater-toolbar label { display:grid; gap:6px; color:var(--text-muted); font-size:.7rem; font-weight:850; text-transform:uppercase; }
+.ads-treater-controls input,.ads-treater-controls select,.ads-treater-toolbar select { min-width:0; border:1px solid var(--border); border-radius:10px; background:var(--surface-soft); color:var(--text); padding:10px; }
+.ads-treater-controls button { border:0; border-radius:10px; background:var(--accent); color:#fff; padding:11px 16px; font-weight:900; cursor:pointer; }
+.ads-treater-file input { padding:8px; }
+.ads-treater-toolbar { display:flex; justify-content:space-between; align-items:end; gap:18px; border-top:1px solid var(--border); margin-top:20px; padding-top:17px; }
+.ads-treater-toolbar>div { display:flex; gap:10px; flex-wrap:wrap; }
+.ads-treater-toolbar span { color:var(--text-muted); font-size:.78rem; }
+.ads-treater-history { margin-top:15px; display:grid; gap:15px; }
+.ads-history-month { border-top:1px solid var(--border); padding-top:13px; }
+.ads-history-month h3 { margin:0 0 10px; font-size:.95rem; }
+.ads-history-grid { display:grid; grid-template-columns:repeat(4,minmax(220px,1fr)); gap:10px; }
+.ads-history-grid article { display:grid; gap:5px; border:1px solid rgba(79,140,255,.45); border-radius:13px; background:var(--surface-soft); padding:13px; }
+.ads-history-grid article span,.ads-history-grid article small { color:var(--text-muted); }
+.ads-history-grid article em { color:#2ee6a8; font-size:.7rem; font-style:normal; font-weight:800; }
+.ads-history-grid article em.pending { color:#f5b84b; }
+.ads-history-grid article>div:last-child { display:flex; gap:7px; margin-top:7px; flex-wrap:wrap; }
+.ads-history-grid a,.ads-history-grid button { border:1px solid var(--border); border-radius:8px; background:transparent; color:var(--text); padding:7px 9px; font-size:.72rem; text-decoration:none; cursor:pointer; }
+.ads-history-grid button:not(.danger) { background:var(--accent); border-color:var(--accent); color:#fff; }
+.ads-history-grid button:disabled { cursor:not-allowed; opacity:.55; border-color:var(--border); }
+.ads-history-grid .danger { color:#ff6b78; }
+.ads-upload-number { color:var(--accent); font-size:.68rem; font-weight:950; text-transform:uppercase; letter-spacing:.08em; }
+.ads-treater-empty { border:1px dashed var(--border); border-radius:12px; color:var(--text-muted); padding:24px; text-align:center; }
+.ads-account-cards { display:grid; gap:18px; margin-top:16px; }
+.ads-account-card { border:1px solid var(--border); border-radius:16px; background:var(--surface-soft); padding:18px; }
+.ads-account-card>header { display:flex; align-items:end; justify-content:space-between; gap:18px; padding-bottom:14px; border-bottom:1px solid var(--border); }
+.ads-account-card>header span { display:block; color:var(--accent); font-size:.67rem; font-weight:900; text-transform:uppercase; }
+.ads-account-card>header h3 { margin:5px 0 0; font-size:1.15rem; }
+.ads-account-controls { display:grid; grid-template-columns:90px 90px 75px minmax(250px,1fr) auto; gap:9px; align-items:end; }
+.ads-account-controls label { display:grid; gap:5px; color:var(--text-muted); font-size:.65rem; font-weight:850; text-transform:uppercase; }
+.ads-account-controls input,.ads-account-controls select { min-width:0; border:1px solid var(--border); border-radius:9px; background:var(--surface); color:var(--text); padding:9px; }
+.ads-account-controls button { border:0; border-radius:9px; background:var(--accent); color:#fff; padding:10px 14px; font-weight:900; cursor:pointer; }
+.ads-account-controls [data-republish-all] { grid-column:4 / 6; justify-self:end; min-width:245px; padding:11px 18px; border:1px solid rgba(79,140,255,.55); background:linear-gradient(135deg,rgba(79,140,255,.2),rgba(40,199,184,.16)); color:var(--accent); box-shadow:0 7px 20px rgba(0,0,0,.12); }
+.ads-account-controls [data-republish-all]:hover { transform:translateY(-1px); border-color:var(--accent); background:linear-gradient(135deg,rgba(79,140,255,.3),rgba(40,199,184,.24)); }
+.ads-account-controls [data-republish-all]:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+.ads-card-file input { padding:6px; }
+.ads-account-meta { color:var(--text-muted); font-size:.74rem; padding:12px 0; }
+.ads-monthly-title { margin:0 0 10px; font-size:.82rem; }
+.ads-account-month-grid { display:grid; grid-template-columns:repeat(4,minmax(210px,1fr)); gap:9px; }
+.ads-account-month { border:1px dashed var(--border); border-radius:12px; color:var(--text-muted); overflow:hidden; transition:border-color .18s ease,background .18s ease; }
+.ads-account-month.is-filled { border-style:solid; border-color:rgba(79,140,255,.6); color:var(--text); }
+.ads-account-month[open] { border-color:var(--accent); background:rgba(79,140,255,.045); }
+.ads-account-month summary { min-height:66px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; cursor:pointer; list-style:none; user-select:none; }
+.ads-account-month summary::-webkit-details-marker { display:none; }
+.ads-account-month summary span { display:grid; gap:5px; }
+.ads-account-month summary strong { color:var(--accent); font-size:.9rem; }
+.ads-account-month summary small { color:var(--text-muted); font-size:.7rem; }
+.ads-account-month summary i { width:26px; height:26px; display:grid; place-items:center; border:1px solid var(--border); border-radius:8px; color:var(--accent); font-style:normal; font-size:1rem; transition:transform .18s ease; }
+.ads-account-month[open] summary i { transform:rotate(180deg); }
+.ads-account-month-content { padding:0 12px 12px; border-top:1px solid var(--border); }
+.ads-account-month-content>p { margin:12px 0 0; color:var(--text-muted); font-size:.72rem; }
+.ads-account-upload { display:grid; gap:4px; margin-top:9px; padding-top:9px; border-top:1px solid var(--border); }
+.ads-account-upload small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); }
+.ads-account-upload em { color:#2ee6a8; font-size:.68rem; font-style:normal; font-weight:800; }
+.ads-account-upload em.pending { color:#f5b84b; }
+.ads-account-upload>div:last-child { display:flex; gap:5px; flex-wrap:wrap; }
+.ads-account-upload a,.ads-account-upload button { border:1px solid var(--border); border-radius:7px; background:transparent; color:var(--text); padding:5px 7px; font-size:.66rem; text-decoration:none; cursor:pointer; }
+.ads-account-upload button:not(.danger) { background:var(--accent); border-color:var(--accent); color:#fff; }
+.ads-account-upload .danger { color:#ff6b78; }
+@media(max-width:1200px){.ads-treater-controls{grid-template-columns:repeat(3,minmax(0,1fr))}.ads-history-grid{grid-template-columns:repeat(2,minmax(220px,1fr))}}
+@media(max-width:1300px){.ads-account-card>header{align-items:stretch;flex-direction:column}.ads-account-controls{width:100%;grid-template-columns:repeat(3,minmax(90px,1fr))}.ads-card-file{grid-column:span 2}.ads-account-controls [data-republish-all]{grid-column:1 / -1}.ads-account-month-grid{grid-template-columns:repeat(3,minmax(200px,1fr))}}
+@media(max-width:700px){.ads-treater-head,.ads-treater-toolbar{align-items:stretch;flex-direction:column}.ads-treater-controls,.ads-history-grid,.ads-account-controls,.ads-account-month-grid{grid-template-columns:1fr}.ads-card-file,.ads-account-controls [data-republish-all]{grid-column:auto;width:100%;min-width:0}.ads-account-month summary{min-height:58px}}
