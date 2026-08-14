@@ -1038,11 +1038,15 @@
     var entries = records.filter(function (record) { return record.value > 0; }).reduce(function (total, record) { return total + record.value; }, 0);
     var exits = records.filter(function (record) { return record.value < 0; }).reduce(function (total, record) { return total + record.value; }, 0);
     var receiptRecords = records.filter(function (record) {
-      return ['RECEITAS', 'JUROS SOBRE INVESTIMENTO'].indexOf(normalizeCashKey(record.classification)) >= 0;
+      return normalizeCashKey(record.classification) === 'RECEITAS';
     });
     var contributionRecords = records.filter(function (record) {
       var order = getDreClassificationOrder(record.classification);
       return order >= 1 && order <= 5;
+    });
+    var marginDetailRecords = records.filter(function (record) {
+      var order = getDreClassificationOrder(record.classification);
+      return order >= 2 && order <= 5;
     });
     var fixedRecords = records.filter(function (record) { return isDreCostRecord(record, 'fixed'); });
     var variableRecords = records.filter(function (record) { return isDreCostRecord(record, 'variable'); });
@@ -1095,7 +1099,26 @@
       if (groupRecords.length) return buildFinancialGroupHierarchy(label, groupRecords, activeMonths, groupId);
       return renderCalculatedRow({ label: label, values: activeMonths.map(function () { return 0; }), subtotal: 1 });
     };
+    var marginDetailBody = function () {
+      var classifications = [];
+      var grouped = new Map();
+      marginDetailRecords.forEach(function (record) {
+        var classification = record.classification || 'Sem classifica\u00e7\u00e3o';
+        if (!grouped.has(classification)) {
+          grouped.set(classification, []);
+          classifications.push(classification);
+        }
+        grouped.get(classification).push(record);
+      });
+      classifications.sort(function (a, b) {
+        return getDreClassificationOrder(a) - getDreClassificationOrder(b) || String(a).localeCompare(String(b), 'pt-BR');
+      });
+      return classifications.map(function (classification, index) {
+        return buildDreClassificationHierarchy(classification, grouped.get(classification), activeMonths, 'cash-margin-' + index);
+      }).join('');
+    };
     var body = renderCalculatedRow(calculatedRows.receipts) +
+      marginDetailBody() +
       renderCalculatedRow(calculatedRows.contribution) +
       renderGroup('CUSTO FIXO TOTAL', fixedRecords, 'cash-fixed') +
       renderCalculatedRow(calculatedRows.operating) +
