@@ -4,6 +4,9 @@
   var state = { companies: [], counterparties: [], payables: [], receivables: [], bankAccounts: [], paymentMethods: [] };
   var options = [];
   var companyFilters = { payable: '', receivable: '' };
+  var dailyCashCompanyFilter = '';
+  var dailyCashConfigCompany = '';
+  var dailyCashConfig = { companies: {} };
   var money = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
   function esc(value) {
@@ -329,15 +332,133 @@
     Array.from(container.querySelectorAll('[data-config-form]')).forEach(function (form) { form.addEventListener('submit', async function (event) { event.preventDefault(); try { await api({ action: 'upsert-financial-config', configType: form.dataset.configForm, name: form.elements.name.value }); } catch (error) { alert(error.message); } }); });
   }
 
-  function renderAll() { renderAccounts('payable'); renderAccounts('receivable'); renderCounterparties(); renderFinancialConfig(); }
+  function isoLocalDate(date) {
+    var year = date.getFullYear();
+    var month = String(date.getMonth() + 1).padStart(2, '0');
+    var day = String(date.getDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+  }
+
+  function dateFromIso(value) {
+    var parts = String(value || '').split('-').map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0, 0);
+  }
+
+  function shiftWeekendToMonday(value) {
+    var date = dateFromIso(value);
+    if (date.getDay() === 6) date.setDate(date.getDate() + 2);
+    if (date.getDay() === 0) date.setDate(date.getDate() + 1);
+    return isoLocalDate(date);
+  }
+
+  function dailyCashCompanyOptions(selected, includeAll) {
+    var first = includeAll ? '<option value="">Todas as empresas</option>' : '<option value="">Selecione a empresa</option>';
+    return first + (state.companies || []).map(function (item) {
+      return '<option value="' + esc(item.id) + '"' + (item.id === selected ? ' selected' : '') + '>' + esc(item.name) + '</option>';
+    }).join('');
+  }
+
+  function dailyConfigFor(companyId) {
+    var companies = dailyCashConfig.companies || (dailyCashConfig.companies = {});
+    return companies[companyId] || { averageReceipt: 0, openingBalance: 0 };
+  }
+
+  function selectedDailyConfigTotal(field) {
+    if (dailyCashCompanyFilter) return number(dailyConfigFor(dailyCashCompanyFilter)[field]);
+    return (state.companies || []).reduce(function (sum, company) { return sum + number(dailyConfigFor(company.id)[field]); }, 0);
+  }
+
+  function paymentHierarchy(records) {
+    if (!records.length) return '<div class="daily-cash-empty">Nenhum pagamento previsto para este dia.</div>';
+    var people = {}; (state.counterparties || []).forEach(function (item) { people[item.id] = item.name; });
+    var classifications = {};
+    records.forEach(function (record) {
+      var classification = record.classification || 'Sem classificação';
+      var category = record.category || 'Sem categoria';
+      var person = people[record.counterpartyId] || 'Fornecedor não informado';
+      if (!classifications[classification]) classifications[classification] = { total: 0, categories: {} };
+      if (!classifications[classification].categories[category]) classifications[classification].categories[category] = { total: 0, people: {} };
+      classifications[classification].total += Math.abs(number(record.amount));
+      classifications[classification].categories[category].total += Math.abs(number(record.amount));
+      classifications[classification].categories[category].people[person] = (classifications[classification].categories[category].people[person] || 0) + Math.abs(number(record.amount));
+    });
+    return '<div class="daily-cash-tree">' + Object.keys(classifications).sort().map(function (classification) {
+      var group = classifications[classification];
+      return '<details><summary><span>' + esc(classification) + '</span><strong>' + money.format(-group.total) + '</strong></summary><div>' +
+        Object.keys(group.categories).sort().map(function (category) {
+          var categoryGroup = group.categories[category];
+          return '<details><summary><span>' + esc(category) + '</span><strong>' + money.format(-categoryGroup.total) + '</strong></summary><div>' +
+            Object.keys(categoryGroup.people).sort().map(function (person) {
+              return '<div class="daily-cash-leaf"><span>' + esc(person) + '</span><strong>' + money.format(-categoryGroup.people[person]) + '</strong></div>';
+            }).join('') + '</div></details>';
+        }).join('') + '</div></details>';
+    }).join('') + '</div>';
+  }
+
+  async function saveDailyCashConfig(companyId, averageReceipt, openingBalance) {
+    dailyCashConfig.companies = dailyCashConfig.companies || {};
+    dailyCashConfig.companies[companyId] = { averageReceipt: averageReceipt, openingBalance: openingBalance, updatedAt: new Date().toISOString() };
+    var response = await fetch('/api/ui-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set', key: 'daily-cash-flow-config', value: dailyCashConfig }) });
+    var result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível salvar a configuração.');
+  }
+
+  function renderDailyCashFlow() {
+    var container = document.getElementById('dailyCashFlowContainer');
+    if (!container) return;
+    if (!dailyCashConfigCompany && state.companies && state.companies.length) dailyCashConfigCompany = state.companies[0].id;
+    var selectedConfig = dailyConfigFor(dailyCashConfigCompany);
+    var start = new Date(); start.setHours(12, 0, 0, 0);
+    var end = new Date(start); end.setDate(end.getDate() + 59);
+    var paymentsByDate = {};
+    (state.payables || []).filter(function (record) {
+      return record.status !== 'settled' && (!dailyCashCompanyFilter || record.companyId === dailyCashCompanyFilter);
+    }).forEach(function (record) {
+      var shifted = shiftWeekendToMonday(record.dueDate);
+      if (shifted < isoLocalDate(start) || shifted > isoLocalDate(end)) return;
+      if (!paymentsByDate[shifted]) paymentsByDate[shifted] = [];
+      paymentsByDate[shifted].push(record);
+    });
+    var averageReceipt = selectedDailyConfigTotal('averageReceipt');
+    var balance = selectedDailyConfigTotal('openingBalance');
+    var rows = []; var totalEntries = 0; var totalExits = 0;
+    for (var index = 0; index < 60; index += 1) {
+      var date = new Date(start); date.setDate(start.getDate() + index);
+      var iso = isoLocalDate(date); var weekday = date.getDay();
+      var entries = weekday >= 1 && weekday <= 5 ? averageReceipt : 0;
+      var records = paymentsByDate[iso] || [];
+      var exits = records.reduce(function (sum, record) { return sum + Math.abs(number(record.amount)); }, 0);
+      var net = entries - exits; balance += net; totalEntries += entries; totalExits += exits;
+      rows.push('<tr class="' + (balance < 0 ? 'daily-cash-risk' : '') + '"><td><button class="daily-cash-expand" type="button" data-daily-toggle="' + iso + '" aria-expanded="false"' + (!records.length ? ' disabled' : '') + '>+</button>' + date.toLocaleDateString('pt-BR') + '</td><td>' + date.toLocaleDateString('pt-BR', { weekday: 'long' }) + '</td><td class="daily-positive">' + money.format(entries) + '</td><td class="daily-negative">' + money.format(-exits) + '</td><td class="' + (net >= 0 ? 'daily-positive' : 'daily-negative') + '">' + money.format(net) + '</td><td class="' + (balance >= 0 ? 'daily-balance' : 'daily-negative') + '">' + money.format(balance) + '</td><td>' + (balance < 0 ? '<span class="daily-cash-status risk">Atenção</span>' : '<span class="daily-cash-status ok">Projetado</span>') + '</td></tr>' +
+        '<tr class="daily-cash-detail" data-daily-detail="' + iso + '" hidden><td colspan="7">' + paymentHierarchy(records) + '</td></tr>');
+    }
+    container.innerHTML = '<div class="accounts-shell daily-cash-shell"><div class="accounts-head"><div><h2>Fluxo de Caixa Dia a Dia</h2><p>Projeção móvel dos próximos 60 dias com recebimento médio e títulos em aberto do Contas a Pagar.</p></div><label class="daily-cash-filter">Empresa<select id="dailyCashCompanyFilter">' + dailyCashCompanyOptions(dailyCashCompanyFilter, true) + '</select></label></div>' +
+      '<section class="accounts-card daily-cash-config"><div><h3>Configurar projeção</h3><p>O recebimento médio é lançado de segunda a sexta. Vencimentos no sábado ou domingo são transferidos para a segunda-feira.</p></div><form id="dailyCashConfigForm"><label>Empresa<select name="companyId" required>' + dailyCashCompanyOptions(dailyCashConfigCompany, false) + '</select></label><label>Recebimento médio por dia<input name="averageReceipt" inputmode="decimal" value="' + esc(selectedConfig.averageReceipt || '') + '" placeholder="R$ 0,00" required></label><label>Saldo inicial<input name="openingBalance" inputmode="decimal" value="' + esc(selectedConfig.openingBalance || '') + '" placeholder="R$ 0,00"></label><button class="accounts-primary" type="submit">Salvar configuração</button></form></section>' +
+      '<section class="daily-cash-kpis"><article><span>Saldo inicial</span><strong>' + money.format(selectedDailyConfigTotal('openingBalance')) + '</strong></article><article><span>Entradas em 60 dias</span><strong class="daily-positive">' + money.format(totalEntries) + '</strong></article><article><span>Saídas previstas</span><strong class="daily-negative">' + money.format(-totalExits) + '</strong></article><article><span>Saldo final projetado</span><strong>' + money.format(balance) + '</strong></article></section>' +
+      '<section class="accounts-card daily-cash-table-card"><div class="daily-cash-caption"><h3>Agenda financeira — 60 dias</h3><span>Somente contas a pagar não baixadas</span></div><div class="accounts-table-wrap"><table class="accounts-table daily-cash-table"><thead><tr><th>Data</th><th>Dia da semana</th><th>Entradas estimadas</th><th>Pagamentos</th><th>Fluxo líquido</th><th>Saldo final</th><th>Status</th></tr></thead><tbody>' + rows.join('') + '</tbody><tfoot><tr><th colspan="2">Total do período</th><th>' + money.format(totalEntries) + '</th><th>' + money.format(-totalExits) + '</th><th>' + money.format(totalEntries - totalExits) + '</th><th>' + money.format(balance) + '</th><th></th></tr></tfoot></table></div></section></div>';
+    document.getElementById('dailyCashCompanyFilter').addEventListener('change', function () { dailyCashCompanyFilter = this.value; renderDailyCashFlow(); });
+    var form = document.getElementById('dailyCashConfigForm');
+    form.elements.companyId.addEventListener('change', function () { dailyCashConfigCompany = this.value; renderDailyCashFlow(); });
+    form.addEventListener('submit', async function (event) {
+      event.preventDefault();
+      try { await saveDailyCashConfig(form.elements.companyId.value, number(form.elements.averageReceipt.value), number(form.elements.openingBalance.value)); renderDailyCashFlow(); }
+      catch (error) { alert(error.message); }
+    });
+    Array.from(container.querySelectorAll('[data-daily-toggle]')).forEach(function (button) {
+      button.addEventListener('click', function () { var detail = container.querySelector('[data-daily-detail="' + button.dataset.dailyToggle + '"]'); var open = button.getAttribute('aria-expanded') === 'true'; button.setAttribute('aria-expanded', String(!open)); button.textContent = open ? '+' : '−'; detail.hidden = open; });
+    });
+  }
+
+  function renderAll() { renderAccounts('payable'); renderAccounts('receivable'); renderCounterparties(); renderFinancialConfig(); renderDailyCashFlow(); }
 
   async function boot() {
     try {
       var loaded = await Promise.all([
         fetch('/api/accounts', { cache: 'no-store' }).then(function (response) { return response.json(); }),
-        fetch('/api/financial-options', { cache: 'no-store' }).then(function (response) { return response.json(); })
+        fetch('/api/financial-options', { cache: 'no-store' }).then(function (response) { return response.json(); }),
+        fetch('/api/ui-state?key=daily-cash-flow-config', { cache: 'no-store' }).then(function (response) { return response.ok ? response.json() : {}; })
       ]);
-      state = loaded[0]; options = loaded[1].options || []; renderAll(); syncAccountsToReports();
+      state = loaded[0]; options = loaded[1].options || []; dailyCashConfig = loaded[2].value || loaded[2] || { companies: {} }; renderAll(); syncAccountsToReports();
     } catch (error) { console.error('Falha ao carregar contas:', error); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

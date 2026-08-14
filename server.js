@@ -453,7 +453,7 @@ function writeJsonWithRetry(filePath, value, attempts = 10) {
   throw lastError;
 }
 
-const persistentUiStateKeys = new Set(['financial-closing', 'closing-comments', 'full-planner', 'forecast-scenarios', 'manual-goals']);
+const persistentUiStateKeys = new Set(['financial-closing', 'closing-comments', 'full-planner', 'forecast-scenarios', 'manual-goals', 'daily-cash-flow-config']);
 
 function readUiState() {
   if (!fs.existsSync(uiStatePath)) return { version: 1, values: {}, updatedAt: null };
