@@ -961,8 +961,8 @@
     return costType === 'fixed' ? order >= 6 && order <= 16 : order >= 17 && order <= 21;
   }
 
-  function buildDreCostHierarchy(label, records, activeMonths, costType) {
-    var rootId = 'dre-' + costType + '-total';
+  function buildFinancialGroupHierarchy(label, records, activeMonths, groupId) {
+    var rootId = 'financial-' + groupId + '-total';
     var root = createCashHierarchyRow(label, records, activeMonths, 'classification', rootId, '', true)
       .replace('cash-hierarchy-row cash-level-classification', 'cash-hierarchy-row cash-level-classification total-row');
     var body = [root];
@@ -1029,6 +1029,103 @@
   }
 
   function renderSummary(selectedYear) {
+    var container = document.getElementById('cashSummaryContainer');
+    if (!container) return;
+    var years = getCashSummaryYears();
+    var year = Number(selectedYear) || years[0] || new Date().getFullYear();
+    var records = filterFinancialRecords(cashFlowState.records).filter(function (record) { return record.year === year; });
+    var activeMonths = Array.from(new Set(records.map(function (record) { return record.month; }).filter(Boolean))).sort(function (a, b) { return a - b; });
+    var entries = records.filter(function (record) { return record.value > 0; }).reduce(function (total, record) { return total + record.value; }, 0);
+    var exits = records.filter(function (record) { return record.value < 0; }).reduce(function (total, record) { return total + record.value; }, 0);
+    var receiptRecords = records.filter(function (record) {
+      return ['RECEITAS', 'JUROS SOBRE INVESTIMENTO'].indexOf(normalizeCashKey(record.classification)) >= 0;
+    });
+    var contributionRecords = records.filter(function (record) {
+      var order = getDreClassificationOrder(record.classification);
+      return order >= 1 && order <= 5;
+    });
+    var fixedRecords = records.filter(function (record) { return isDreCostRecord(record, 'fixed'); });
+    var variableRecords = records.filter(function (record) { return isDreCostRecord(record, 'variable'); });
+    var valueFor = function (rows, month) { return sumCashRows(rows, month); };
+    var totalReceipts = receiptRecords.reduce(function (total, record) { return total + record.value; }, 0);
+    var totalResult = contributionRecords.concat(fixedRecords, variableRecords)
+      .reduce(function (total, record) { return total + record.value; }, 0);
+    var yearOptions = (years.length ? years : [year]).map(function (item) {
+      return '<option value="' + item + '"' + (item === year ? ' selected' : '') + '>' + item + '</option>';
+    }).join('');
+    var actions = financialCompanyControl('cashSummaryCompany') + '<label>Ano <select class="closing-select" id="cashSummaryYear">' + yearOptions + '</select></label>';
+
+    var calculatedRows = {
+      receipts: { label: 'RECEBIMENTOS', values: activeMonths.map(function (month) { return valueFor(receiptRecords, month); }), subtotal: 0 },
+      contribution: { label: 'MARGEM DE CONTRIBUI\u00c7\u00c3O R$', values: activeMonths.map(function (month) { return valueFor(contributionRecords, month); }), subtotal: 1 },
+      operating: { label: 'RESULTADO OPERACIONAL R$', values: activeMonths.map(function (month) { return valueFor(contributionRecords, month) + valueFor(fixedRecords, month); }), subtotal: 1 },
+      result: { label: 'RESULTADO R$', values: activeMonths.map(function (month) { return valueFor(contributionRecords, month) + valueFor(fixedRecords, month) + valueFor(variableRecords, month); }), subtotal: 1 },
+      resultPercent: { label: 'RESULTADO %', values: activeMonths.map(function (month) {
+        var receipts = valueFor(receiptRecords, month);
+        return receipts ? (valueFor(contributionRecords, month) + valueFor(fixedRecords, month) + valueFor(variableRecords, month)) / receipts : 0;
+      }), subtotal: 2 },
+      entries: { label: 'TOTAL DE ENTRADAS', values: activeMonths.map(function (month) {
+        return records.filter(function (record) { return record.month === month && record.value > 0; })
+          .reduce(function (total, record) { return total + record.value; }, 0);
+      }), subtotal: 1 },
+      exits: { label: 'TOTAL DE SA\u00cdDAS', values: activeMonths.map(function (month) {
+        return records.filter(function (record) { return record.month === month && record.value < 0; })
+          .reduce(function (total, record) { return total + record.value; }, 0);
+      }), subtotal: 1 }
+    };
+    calculatedRows.variation = {
+      label: 'VARIA\u00c7\u00c3O DO CAIXA',
+      values: activeMonths.map(function (_, index) { return calculatedRows.entries.values[index] + calculatedRows.exits.values[index]; }),
+      subtotal: 1
+    };
+
+    var renderCalculatedRow = function (row) {
+      var isPercent = row.subtotal === 2;
+      var cells = row.values.map(function (value, index) {
+        return '<td class="' + numberClass(value) + '">' + (isPercent
+          ? new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(value)
+          : numericButton(row.label, activeMonths[index], value, 'fluxo')) + '</td>';
+      }).join('');
+      var total = isPercent ? (totalReceipts ? totalResult / totalReceipts : 0) : sum(row.values);
+      return '<tr class="' + (row.subtotal ? 'total-row' : '') + '"><td>' + escapeCashHtml(row.label) + '</td>' + cells +
+        '<td class="' + numberClass(total) + '">' + (isPercent
+          ? new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 1 }).format(total) : money(total)) + '</td></tr>';
+    };
+    var renderGroup = function (label, groupRecords, groupId) {
+      if (groupRecords.length) return buildFinancialGroupHierarchy(label, groupRecords, activeMonths, groupId);
+      return renderCalculatedRow({ label: label, values: activeMonths.map(function () { return 0; }), subtotal: 1 });
+    };
+    var body = renderCalculatedRow(calculatedRows.receipts) +
+      renderCalculatedRow(calculatedRows.contribution) +
+      renderGroup('CUSTO FIXO TOTAL', fixedRecords, 'cash-fixed') +
+      renderCalculatedRow(calculatedRows.operating) +
+      renderGroup('CUSTO VARI\u00c1VEL TOTAL', variableRecords, 'cash-variable') +
+      renderCalculatedRow(calculatedRows.result) +
+      renderCalculatedRow(calculatedRows.resultPercent) +
+      renderCalculatedRow(calculatedRows.entries) +
+      renderCalculatedRow(calculatedRows.exits) +
+      renderCalculatedRow(calculatedRows.variation);
+    var table = records.length && activeMonths.length
+      ? '<div class="closing-card"><div class="closing-card-head"><h3>Estrutura do Fluxo de Caixa</h3><span class="closing-pill">Somente meses importados</span></div>' +
+        '<div class="closing-table-wrap"><table class="closing-table cash-hierarchy-table"><thead><tr><th>Linha do Fluxo</th>' +
+        activeMonths.map(function (month) { return '<th>' + months[month - 1] + '</th>'; }).join('') +
+        '<th>TOTAL</th></tr></thead><tbody>' + body + '</tbody></table></div></div>'
+      : '<div class="closing-import"><strong>Nenhum lan\u00e7amento importado para ' + year + '.</strong><br>Os meses aparecer\u00e3o somente depois da leitura do arquivo.</div>';
+    container.innerHTML = '<div class="closing-shell">' +
+      head('Resumo de Fluxo de Caixa', 'Recebimentos, margem, custos e resultado calculados exclusivamente com os lan\u00e7amentos financeiros existentes.', actions) +
+      kpis([['Entradas acumuladas', entries], ['Sa\u00eddas acumuladas', exits], ['Varia\u00e7\u00e3o do caixa', entries + exits], ['Resultado', totalResult]]) +
+      table + '</div>';
+    var yearSelect = document.getElementById('cashSummaryYear');
+    if (yearSelect) yearSelect.addEventListener('change', function () { renderSummary(yearSelect.value); });
+    var companySelect = document.getElementById('cashSummaryCompany');
+    if (companySelect) companySelect.addEventListener('change', function () {
+      selectedFinancialCompany = this.value;
+      refreshSalesRevenueFromDashboardUploads().then(function () { renderSummary(year); renderCashFlow(); renderDre(); });
+    });
+    bindCashExpandButtons(container);
+  }
+
+  function renderLegacySummary(selectedYear) {
     var container = document.getElementById('cashSummaryContainer');
     if (!container) return;
     var years = getCashSummaryYears();
@@ -1129,6 +1226,20 @@
       structure.splice(resultPercentIndex >= 0 ? resultPercentIndex + 1 : structure.length, 0,
         { label: 'MARGEM PARA O PONTO DE EQUILÍBRIO', subtotal: 2 });
     }
+    var takeDreLine = function (label, fallback) {
+      var key = normalizeCashKey(label);
+      var index = structure.findIndex(function (line) { return normalizeCashKey(line.label) === key; });
+      return index >= 0 ? structure.splice(index, 1)[0] : fallback;
+    };
+    var resultValueLine = takeDreLine('RESULTADO R$', { label: 'RESULTADO R$', subtotal: 1 });
+    var resultPercentageLine = takeDreLine('RESULTADO %', { label: 'RESULTADO %', subtotal: 2 });
+    var breakEvenIndex = structure.findIndex(function (line) {
+      return normalizeCashKey(line.label).indexOf('MARGEM PARA O PONTO DE EQUIL') === 0;
+    });
+    var breakEvenLine = breakEvenIndex >= 0
+      ? structure.splice(breakEvenIndex, 1)[0]
+      : { label: 'MARGEM PARA O PONTO DE EQUIL\u00cdBRIO', subtotal: 2 };
+    structure.push(resultValueLine, resultPercentageLine, breakEvenLine);
     var rows = structure.map(function (line) {
       return { label: line.label, subtotal: Number(line.subtotal) || 0, values: activeMonths.map(function (month) {
         return getDreActual(line.label, month, year);
@@ -1142,7 +1253,7 @@
       var costType = rowKey === 'CUSTO FIXO TOTAL' ? 'fixed' : rowKey === 'CUSTO VARIAVEL TOTAL' ? 'variable' : '';
       if (costType) {
         var costRecords = yearRecords.filter(function (record) { return isDreCostRecord(record, costType); });
-        if (costRecords.length) return buildDreCostHierarchy(row.label, costRecords, activeMonths, costType);
+        if (costRecords.length) return buildFinancialGroupHierarchy(row.label, costRecords, activeMonths, 'dre-' + costType);
       }
       var rowOrder = getDreClassificationOrder(row.label);
       if ((rowOrder >= 6 && rowOrder <= 16) || (rowOrder >= 17 && rowOrder <= 21)) return '';
