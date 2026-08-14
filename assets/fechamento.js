@@ -241,13 +241,96 @@
   }
 
   function templateBudgetRows(year) {
-    return classifyBudgetRows(budgetState.details || [], year !== 2026);
+    return reconcileBudgetRows(classifyBudgetRows(budgetState.details || [], year !== 2026));
+  }
+
+  function budgetStructureKey(kind, label, parentLabel) {
+    return [kind, normalizeCashKey(parentLabel || ''), normalizeCashKey(label)].join('|');
+  }
+
+  function canonicalBudgetRows() {
+    var orderedMappings = mappings.slice().sort(function (a, b) {
+      return Number(a[2] || 999) - Number(b[2] || 999) ||
+        String(a[1] || '').localeCompare(String(b[1] || ''), 'pt-BR') ||
+        String(a[0] || '').localeCompare(String(b[0] || ''), 'pt-BR');
+    });
+    var rows = [];
+    var classifications = {};
+    orderedMappings.forEach(function (mapping) {
+      var category = normalizeCashText(mapping[0]);
+      var classification = normalizeCashText(mapping[1]);
+      var classificationKey = normalizeCashKey(classification);
+      if (!category || !classification || normalizeCashKey(category) === 'PROJETOS PATAS FIEIS') return;
+      if (!classifications[classificationKey]) {
+        var classificationId = 'budget-dre-' + classificationKey.replace(/[^A-Z0-9]+/g, '-').toLowerCase().replace(/^-|-$/g, '');
+        classifications[classificationKey] = { id: classificationId, label: classification };
+        rows.push({ id: classificationId, label: classification, kind: 'classification', parentId: '', values: Array(12).fill(0) });
+      }
+      var parent = classifications[classificationKey];
+      var duplicate = rows.some(function (row) {
+        return row.kind === 'category' && row.parentId === parent.id && normalizeCashKey(row.label) === normalizeCashKey(category);
+      });
+      if (duplicate) return;
+      rows.push({
+        id: parent.id + '-category-' + normalizeCashKey(category).replace(/[^A-Z0-9]+/g, '-').toLowerCase().replace(/^-|-$/g, ''),
+        label: category,
+        kind: 'category',
+        parentId: parent.id,
+        values: Array(12).fill(0)
+      });
+    });
+    return rows;
+  }
+
+  function reconcileBudgetRows(existingRows) {
+    var source = Array.isArray(existingRows) ? existingRows : [];
+    var canonical = canonicalBudgetRows();
+    var existingParents = {};
+    source.forEach(function (row) {
+      if (row.kind === 'classification') existingParents[row.id] = row.label;
+    });
+    var existingByKey = {};
+    source.forEach(function (row) {
+      var parentLabel = row.kind === 'category' ? existingParents[row.parentId] || '' : '';
+      existingByKey[budgetStructureKey(row.kind, row.label, parentLabel)] = row;
+    });
+    var canonicalParents = {};
+    canonical.forEach(function (row) {
+      if (row.kind === 'classification') canonicalParents[row.id] = row.label;
+    });
+    var merged = canonical.map(function (row) {
+      var parentLabel = row.kind === 'category' ? canonicalParents[row.parentId] || '' : '';
+      var saved = existingByKey[budgetStructureKey(row.kind, row.label, parentLabel)];
+      return {
+        id: row.id,
+        label: row.label,
+        kind: row.kind,
+        parentId: row.parentId,
+        values: Array.from({ length: 12 }, function (_, monthIndex) {
+          return saved ? Number((saved.values || [])[monthIndex]) || 0 : 0;
+        })
+      };
+    });
+    var canonicalKeys = new Set(canonical.map(function (row) {
+      var parentLabel = row.kind === 'category' ? canonicalParents[row.parentId] || '' : '';
+      return budgetStructureKey(row.kind, row.label, parentLabel);
+    }));
+    source.forEach(function (row) {
+      var parentLabel = row.kind === 'category' ? existingParents[row.parentId] || '' : '';
+      if (!canonicalKeys.has(budgetStructureKey(row.kind, row.label, parentLabel))) merged.push(row);
+    });
+    return merged;
   }
 
   function getBudgetRows(year) {
     var savedYear = budgetDatabase.years && budgetDatabase.years[String(year)];
-    if (savedYear && Array.isArray(savedYear.rows)) return savedYear.rows;
-    if (!budgetDrafts[String(year)]) budgetDrafts[String(year)] = templateBudgetRows(year);
+    if (!budgetDrafts[String(year)]) {
+      budgetDrafts[String(year)] = savedYear && Array.isArray(savedYear.rows)
+        ? reconcileBudgetRows(savedYear.rows)
+        : templateBudgetRows(year);
+    } else {
+      budgetDrafts[String(year)] = reconcileBudgetRows(budgetDrafts[String(year)]);
+    }
     return budgetDrafts[String(year)];
   }
 
