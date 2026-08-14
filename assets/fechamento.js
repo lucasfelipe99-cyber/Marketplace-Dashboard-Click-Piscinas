@@ -197,7 +197,6 @@
       }
       dreStructure = Array.isArray(seed.dreStructure) ? seed.dreStructure : [];
       salesDre = seed.salesDre && seed.salesDre.months ? seed.salesDre : salesDre;
-      saveClosingState();
     } catch (error) {
       console.warn('Não foi possível carregar o fechamento inicial:', error.message);
     }
