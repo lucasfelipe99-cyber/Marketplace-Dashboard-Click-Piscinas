@@ -408,7 +408,7 @@
 
   function renderCostRegistration() {
     var pendingImport = [];
-    var refreshWarning = database.awaitingBaseRefresh ? '<section class="pricing-card pricing-required-warning"><strong>Atualização obrigatória</strong><span>Os custos e os SKUs publicados foram limpos. Acesse o Tratador de Vendas e clique em “Atualizar todas as bases” antes de cadastrar novos custos.</span></section>' : '';
+    var refreshWarning = database.awaitingBaseRefresh ? '<section class="pricing-card pricing-required-warning"><strong>Atualização obrigatória</strong><span>Os custos antigos foram removidos das bases. Os SKUs publicados aparecem abaixo como pendentes. Cadastre os custos e depois acesse o Tratador de Vendas para clicar em “Atualizar todas as bases”.</span></section>' : '';
     costContainer.innerHTML = '<div class="pricing-page"><section class="pricing-card pricing-hero"><div class="pricing-heading"><strong>Cadastro de Custos por SKU</strong><span>Os produtos sem custo aparecem automaticamente em vermelho para cadastro.</span></div><div class="pricing-cost-hero-actions"><span class="inventory-link" id="costRegisteredCount">' + Object.keys(database.costs || {}).length + ' cadastrados · ' + (database.pendingCosts || []).length + ' pendentes</span><button class="pricing-button danger" id="clearAllCosts" type="button">Limpar todos os cadastros</button></div></section>' +
       refreshWarning +
       '<section class="pricing-card pricing-import"><div class="pricing-import-head"><div><strong>Importar cadastro por planilha</strong><span>Baixe o modelo, preencha a aba PRECIFIQUE 2.0 e envie o arquivo XLSX.</span></div><div class="pricing-import-buttons"><button class="pricing-button" id="costTemplateDownload" type="button">Baixar base</button><label class="pricing-button primary" for="costCsvFile">Selecionar planilha</label></div><input id="costCsvFile" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden></div>' +
@@ -473,11 +473,12 @@
         if (!response.ok) throw new Error(result.error || 'Não foi possível limpar os cadastros.');
         database = result;
         database.lastPricing = database.lastPricing || {};
-        document.getElementById('costRegisteredCount').textContent = '0 cadastrados · 0 SKUs publicados';
+        var pendingAfterClear = (database.pendingCosts || []).length;
+        document.getElementById('costRegisteredCount').textContent = '0 cadastrados · ' + pendingAfterClear + ' pendentes';
         status.className = 'pricing-status success';
-        status.textContent = total + ' cadastro(s) de custo e ' + publishedTotal + ' SKU(s) publicado(s) removido(s). Acesse o Tratador de Vendas e clique em “Atualizar todas as bases” antes de continuar.';
+        status.textContent = total + ' cadastro(s) removido(s). ' + pendingAfterClear + ' SKU(s) publicado(s) aguardam cadastro de custo. Depois, atualize todas as bases no Tratador de Vendas.';
         table();
-        alert('Limpeza concluída. É obrigatório acessar o Tratador de Vendas e clicar em “Atualizar todas as bases” para reconstruir os SKUs e recalcular as planilhas.');
+        alert('Limpeza concluída. Os SKUs sem custo estão destacados em vermelho. Após cadastrar os custos, use “Atualizar todas as bases” no Tratador de Vendas.');
       } catch (error) {
         status.className = 'pricing-status error';
         status.textContent = error.message;

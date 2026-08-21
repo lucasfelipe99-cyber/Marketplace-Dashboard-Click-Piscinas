@@ -2427,6 +2427,73 @@ async function handlePricingRulesUpdate(request, response) {
   }
 }
 
+function removeCostValuesFromRows(sourceRows) {
+  if (!Array.isArray(sourceRows) || sourceRows.length < 2 || !Array.isArray(sourceRows[0])) return sourceRows;
+  const rows = sourceRows.map((row) => Array.isArray(row) ? row.slice() : []);
+  const headers = rows[0];
+  const categoryIndex = treatedHeaderIndex(headers, ['Categoria']);
+  const valueIndex = treatedHeaderIndex(headers, ['Valor', 'Value']);
+  const costIndex = treatedHeaderIndex(headers, ['Custo do produto', 'CMV']);
+  const marginIndex = treatedHeaderIndex(headers, ['Gross margen', 'Gross margin', 'Margin R$', 'GM']);
+  const marginPercentIndex = treatedHeaderIndex(headers, ['Gross margen %', 'Gross margin %', 'Margin %', 'GM %']);
+  const liquidIndex = treatedHeaderIndex(headers, ['Liquido', 'Líquido']);
+  const taxIndex = treatedHeaderIndex(headers, ['Imposto']);
+  const revenueIndex = treatedHeaderIndex(headers, ['Faturamento', 'Fat']);
+  if (categoryIndex >= 0 && valueIndex >= 0) {
+    rows.slice(1).forEach((row) => {
+      const category = normalizeAdsText(row[categoryIndex]);
+      if (category === 'cmv' || category.includes('custo do produto vendido') || category.includes('custo de produto vendido')) row[valueIndex] = 0;
+    });
+    return rows;
+  }
+  if (costIndex < 0) return rows;
+  rows.slice(1).forEach((row) => {
+    row[costIndex] = '';
+    if (marginIndex >= 0) row[marginIndex] = treatedNumber(liquidIndex >= 0 ? row[liquidIndex] : 0) + treatedNumber(taxIndex >= 0 ? row[taxIndex] : 0);
+    if (marginPercentIndex >= 0) {
+      const revenue = treatedNumber(revenueIndex >= 0 ? row[revenueIndex] : 0);
+      row[marginPercentIndex] = revenue ? treatedNumber(row[marginIndex]) / revenue : '';
+    }
+  });
+  return rows;
+}
+
+function clearPersistedCostValues() {
+  let publishedFiles = 0;
+  let treatmentFiles = 0;
+  const metadata = readMetadata();
+  Object.values(metadata.areas && metadata.areas.area1 && metadata.areas.area1.months || {}).forEach((month) => {
+    const rowsPath = month && month.rowsName ? resolveDataFilePath(month.rowsName) : '';
+    if (!rowsPath || !fs.existsSync(rowsPath)) return;
+    try {
+      const payload = JSON.parse(fs.readFileSync(rowsPath, 'utf8'));
+      if (!Array.isArray(payload.rows)) return;
+      payload.rows = removeCostValuesFromRows(payload.rows);
+      writeJsonWithRetry(rowsPath, payload);
+      publishedFiles += 1;
+    } catch (error) {
+      console.warn('Nao foi possivel limpar o CMV publicado em', month.rowsName, error.message);
+    }
+  });
+  const salesState = readSalesTreaters();
+  (salesState.channels || []).forEach((channel) => {
+    (channel.treatmentHistory || []).forEach((record) => {
+      const treatedPath = record && record.storedName ? resolveDataFilePath(record.storedName) : '';
+      if (!treatedPath || !fs.existsSync(treatedPath)) return;
+      try {
+        const payload = JSON.parse(fs.readFileSync(treatedPath, 'utf8'));
+        if (Array.isArray(payload.sourceRows)) payload.sourceRows = removeCostValuesFromRows(payload.sourceRows);
+        if (Array.isArray(payload.rows)) payload.rows = removeCostValuesFromRows(payload.rows);
+        writeJsonWithRetry(treatedPath, payload);
+        treatmentFiles += 1;
+      } catch (error) {
+        console.warn('Nao foi possivel limpar o CMV tratado em', record.storedName, error.message);
+      }
+    });
+  });
+  return { publishedFiles, treatmentFiles };
+}
+
 function readPricingDatabase() {
   if (!fs.existsSync(pricingDatabasePath)) {
     return { version: 2, costs: {}, history: [], lastPricing: {}, pendingCosts: findPublishedSkusWithoutCost({}), awaitingBaseRefresh: false, updatedAt: null };
@@ -2444,7 +2511,16 @@ function readPricingDatabase() {
       baseRefreshedAfterCostClearAt: value.baseRefreshedAfterCostClearAt || null,
       updatedAt: value.updatedAt || null
     };
-    state.pendingCosts = state.awaitingBaseRefresh ? [] : findPublishedSkusWithoutCost(state.costs);
+    if (state.awaitingBaseRefresh && !value.persistedCostsClearedAt && !Object.keys(state.costs).length) {
+      const summary = clearPersistedCostValues();
+      state.persistedCostsClearedAt = new Date().toISOString();
+      state.persistedCostsClearedSummary = summary;
+      writeJsonWithRetry(pricingDatabasePath, { ...value, ...state, pendingCosts: undefined });
+    } else {
+      state.persistedCostsClearedAt = value.persistedCostsClearedAt || null;
+      state.persistedCostsClearedSummary = value.persistedCostsClearedSummary || null;
+    }
+    state.pendingCosts = findPublishedSkusWithoutCost(state.costs);
     return state;
   } catch (error) {
     return { version: 2, costs: {}, history: [], lastPricing: {}, pendingCosts: [], updatedAt: null };
@@ -2463,13 +2539,19 @@ function findPublishedSkusWithoutCost(costs) {
       const skuIndex = indexOf(['sku', 'numero de referencia sku']);
       const descriptionIndex = indexOf(['descricao', 'titulo do anuncio', 'nome do produto']);
       const categoryIndex = indexOf(['categoria2', 'categoria']);
-      if (skuIndex < 0) return;
+      const adIndex = indexOf(['id anuncio', 'id do anuncio', '# de anuncio', 'id do produto']);
+      const marketplaceSaleIndex = indexOf(['marketplace venda']);
+      if (skuIndex < 0 && adIndex < 0 && descriptionIndex < 0) return;
       rows.slice(1).forEach((row) => {
-        const sku = String(row[skuIndex] || '').trim();
+        const marketplaceSale = marketplaceSaleIndex >= 0 ? String(row[marketplaceSaleIndex] || '').trim() : '';
+        const description = descriptionIndex >= 0 ? String(row[descriptionIndex] || '').trim() : '';
+        const sku = String(skuIndex >= 0 ? row[skuIndex] || '' : '').trim()
+          || String(adIndex >= 0 ? row[adIndex] || '' : '').trim()
+          || [description, marketplaceSale].filter(Boolean).join(' - ');
         if (!sku || Object.prototype.hasOwnProperty.call(costs || {}, sku) || pending.has(sku)) return;
         pending.set(sku, {
           sku,
-          description: descriptionIndex >= 0 ? String(row[descriptionIndex] || '').trim() : '',
+          description,
           category: categoryIndex >= 0 ? String(row[categoryIndex] || '').trim() : '',
           productCost: null,
           pending: true
@@ -2494,16 +2576,14 @@ async function handlePricingDatabaseUpdate(request, response) {
     const state = readPricingDatabase();
     const now = new Date().toISOString();
 
-    if (state.awaitingBaseRefresh && ['upsert-cost', 'import-costs'].includes(payload.action)) {
-      return sendJson(response, 409, { error: 'Atualize todas as bases no Tratador de Vendas antes de cadastrar novos custos.' });
-    }
-
     if (payload.action === 'clear-costs') {
       if (!requireAdmin(request, response)) return;
       state.costs = {};
       state.awaitingBaseRefresh = true;
       state.costsClearedAt = now;
       state.costsClearedBy = String(payload.responsible || '').trim() || 'Administrador';
+      state.persistedCostsClearedSummary = clearPersistedCostValues();
+      state.persistedCostsClearedAt = now;
     } else if (payload.action === 'upsert-cost') {
       const sku = String(payload.sku || '').trim();
       if (!sku) return sendJson(response, 400, { error: 'Informe o SKU.' });
@@ -2582,7 +2662,7 @@ async function handlePricingDatabaseUpdate(request, response) {
     state.updatedAt = now;
     delete state.pendingCosts;
     writeJsonWithRetry(pricingDatabasePath, state);
-    state.pendingCosts = state.awaitingBaseRefresh ? [] : findPublishedSkusWithoutCost(state.costs);
+    state.pendingCosts = findPublishedSkusWithoutCost(state.costs);
     sendJson(response, 200, state);
   } catch (error) {
     sendJson(response, 400, { error: error.message === 'INVALID_JSON' ? 'JSON invalido.' : error.message });
