@@ -138,6 +138,13 @@
     var action=item.status==='raw'?'<button type="button" disabled>Aguardando tratador</button>':'<button type="button" data-add-upload>'+(item.status==='published'?'Republicar':'Enviar para a base')+'</button>';
     return '<article class="ads-account-upload" data-upload-id="'+item.id+'"><div class="ads-upload-number">Dia '+item.day+' · Subida '+item.sequence+'</div><small>'+escapeHtml(item.fileName)+' · '+formatBytes(item.size)+'</small>'+status+'<div><a href="/api/ads-treater/file?id='+encodeURIComponent(item.id)+'">Baixar</a>'+action+'<button type="button" class="danger" data-delete-upload>Excluir</button></div></article>';
   }
+  function latestTreatedMonth(rows){
+    var treated=rows.filter(function(item){return item.status==='treated'||item.status==='published';}).sort(function(a,b){return Number(b.year)-Number(a.year)||Number(b.month)-Number(a.month)||Number(b.day)-Number(a.day)||Number(b.sequence)-Number(a.sequence);});
+    if(!treated.length)return null;
+    var year=Number(treated[0].year),month=Number(treated[0].month),monthRows=treated.filter(function(item){return Number(item.year)===year&&Number(item.month)===month;}).sort(function(a,b){return Number(a.day)-Number(b.day)||Number(a.sequence)-Number(b.sequence);});
+    var days=Array.from(new Set(monthRows.map(function(item){return Number(item.day);}))).sort(function(a,b){return a-b;});
+    return{year:year,month:month,rows:monthRows,days:days};
+  }
   function renderHistory(){
     var accounts=[],seen=new Set();registeredAccounts.forEach(function(item){var key=item.marketplace+'\u001f'+item.account;if(!item.account||seen.has(key))return;seen.add(key);accounts.push(item);});
     historySummary.textContent=accounts.length.toLocaleString('pt-BR')+' conta(s) · '+uploadHistory.length.toLocaleString('pt-BR')+' subida(s)';
@@ -150,8 +157,9 @@
         var rows=accountRows.filter(function(item){return Number(item.year)===year&&Number(item.month)===index+1;}).sort(function(a,b){return Number(a.day)-Number(b.day)||Number(a.sequence)-Number(b.sequence);});
         return '<details class="ads-account-month'+(rows.length?' is-filled':'')+'"><summary><span><strong>'+name+' / '+year+'</strong><small>'+(rows.length?rows.length+' subida(s)':'Ainda não alimentado')+'</small></span><i aria-hidden="true">⌄</i></summary><div class="ads-account-month-content">'+(rows.length?rows.map(uploadMarkup).join(''):'<p>Nenhum arquivo cadastrado neste mês.</p>')+'</div></details>';
       }).join('');
-      var treatedCount=accountRows.filter(function(item){return item.status==='treated'||item.status==='published';}).length;
-      return '<article class="ads-account-card" data-ads-account="'+escapeHtml(account.account)+'" data-ads-platform="'+escapeHtml(account.marketplace)+'" data-card-year="'+defaultYear+'"><header><div><span>'+escapeHtml(account.marketplace)+'</span><h3>'+escapeHtml(account.account)+'</h3></div><div class="ads-account-controls"><label>Mês<select data-card-month>'+monthOptions+'</select></label><label class="ads-card-file">Selecionar relatórios brutos<input data-card-file type="file" multiple accept=".xlsx,.xlsm,.xls,.csv,.zip,.txt"></label><button type="button" data-card-save>Tratar e salvar arquivos</button><button type="button" data-republish-all'+(treatedCount?'':' disabled')+'>Republicar todas as bases de ADS</button></div></header><div class="ads-account-meta">O dia é identificado automaticamente pelo nome de cada arquivo (ex.: 1.xlsx = dia 1). · '+accountRows.length+' subida(s) armazenada(s) no disco persistente · '+treatedCount+' pronta(s) para republicar</div><div class="ads-account-operation" data-account-status></div><h4 class="ads-monthly-title">Controle mensal de arquivos</h4><div class="ads-account-month-grid">'+months+'</div></article>';
+      var treatedCount=accountRows.filter(function(item){return item.status==='treated'||item.status==='published';}).length,latest=latestTreatedMonth(accountRows);
+      var latestLabel=latest?monthNames[latest.month-1]+'/'+latest.year:'último mês',latestDays=latest?latest.days.join(', '):'—';
+      return '<article class="ads-account-card" data-ads-account="'+escapeHtml(account.account)+'" data-ads-platform="'+escapeHtml(account.marketplace)+'" data-card-year="'+defaultYear+'"><header><div><span>'+escapeHtml(account.marketplace)+'</span><h3>'+escapeHtml(account.account)+'</h3></div><div class="ads-account-controls"><label>Mês<select data-card-month>'+monthOptions+'</select></label><label class="ads-card-file">Selecionar relatórios brutos<input data-card-file type="file" multiple accept=".xlsx,.xlsm,.xls,.csv,.zip,.txt"></label><button type="button" data-card-save>Tratar e salvar arquivos</button><button type="button" data-republish-latest'+(latest?'':' disabled')+'>Republicar último mês ('+latestLabel+')</button></div></header><div class="ads-account-meta">O dia é identificado automaticamente pelo nome de cada arquivo (ex.: 1.xlsx = dia 1). · '+accountRows.length+' subida(s) no disco · '+treatedCount+' tratada(s) · Último mês: '+latestLabel+' · Dias disponíveis: '+latestDays+'</div><div class="ads-account-operation" data-account-status></div><h4 class="ads-monthly-title">Controle mensal de arquivos</h4><div class="ads-account-month-grid">'+months+'</div></article>';
     }).join('');
   }
   async function loadHistory(){try{var response=await fetch('/api/ads-treater/uploads',{cache:'no-store'}),result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível carregar o histórico.');uploadHistory=result.uploads||[];renderHistory();}catch(error){historyBox.innerHTML='<div class="ads-treater-empty">'+escapeHtml(error.message)+'</div>';historySummary.textContent='Falha ao carregar';}}
@@ -208,18 +216,19 @@
     return { rows: rows, duplicateRows: duplicateRows, categories: categories, minDate: rows.map(function (r) { return r.date; }).sort()[0], maxDate: rows.map(function (r) { return r.date; }).sort().slice(-1)[0] };
   }
   historyBox.addEventListener('click',async function(event){
-    var bulkButton=event.target.closest('[data-republish-all]');
+    var bulkButton=event.target.closest('[data-republish-latest]');
     if(bulkButton){
       var bulkCard=bulkButton.closest('.ads-account-card'),bulkAccount=bulkCard.getAttribute('data-ads-account'),bulkPlatform=bulkCard.getAttribute('data-ads-platform'),bulkStatus=bulkCard.querySelector('[data-account-status]');
-      var bulkRows=uploadHistory.filter(function(item){return item.account===bulkAccount&&item.platform===bulkPlatform&&(item.status==='treated'||item.status==='published');}).sort(function(a,b){return Number(a.year)-Number(b.year)||Number(a.month)-Number(b.month)||Number(a.day)-Number(b.day)||Number(a.sequence)-Number(b.sequence);});
-      var bulkPassword=document.getElementById('adsUploadPassword').value||prompt('Informe a senha administrativa para republicar todas as bases de ADS:');
+      var latest=latestTreatedMonth(uploadHistory.filter(function(item){return item.account===bulkAccount&&item.platform===bulkPlatform;})),bulkRows=latest?latest.rows:[];
+      if(!latest||!bulkRows.length){alert('Nenhuma base tratada foi encontrada para esta conta.');return;}
+      var bulkLabel=monthNames[latest.month-1]+'/'+latest.year,bulkPassword=document.getElementById('adsUploadPassword').value||prompt('Informe a senha administrativa para republicar '+bulkLabel+':');
       if(!bulkPassword)return;
       try{
         bulkButton.disabled=true;var total=0;
         for(var bulkIndex=0;bulkIndex<bulkRows.length;bulkIndex+=1){bulkButton.textContent='Republicando '+(bulkIndex+1)+' de '+bulkRows.length+'...';bulkStatus.textContent='Publicando '+monthNames[Number(bulkRows[bulkIndex].month)-1]+' · dia '+bulkRows[bulkIndex].day+' · subida '+bulkRows[bulkIndex].sequence;var bulkResult=await publishTreatedUpload(bulkRows[bulkIndex],bulkPassword);total+=Number(bulkResult.added)||0;}
-        bulkStatus.innerHTML='<strong>Republicação concluída.</strong> '+bulkRows.length+' base(s) e '+total.toLocaleString('pt-BR')+' linha(s) de ADS foram consolidadas com as vendas.';
+        bulkStatus.innerHTML='<strong>'+bulkLabel+' republicado.</strong> Dias '+latest.days.join(', ')+' · '+bulkRows.length+' base(s) e '+total.toLocaleString('pt-BR')+' linha(s) de ADS consolidadas com as vendas.';
         await loadHistory();
-      }catch(error){bulkStatus.textContent=error.message;alert(error.message);}finally{bulkButton.disabled=false;bulkButton.textContent='Republicar todas as bases de ADS';}
+      }catch(error){bulkStatus.textContent=error.message;alert(error.message);}finally{bulkButton.disabled=false;bulkButton.textContent='Republicar último mês ('+bulkLabel+')';}
       return;
     }
     if(event.target.matches('[data-card-save]')){
