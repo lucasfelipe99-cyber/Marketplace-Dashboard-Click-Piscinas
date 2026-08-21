@@ -14,6 +14,8 @@
 .treat-list{display:grid;gap:10px}
 .treat-list article{display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto auto;align-items:center;gap:10px}
 .treat-channel{display:grid;gap:3px}.treat-channel b{color:var(--accent);font-size:9px;text-transform:uppercase}
+.treat-tax-editor{display:flex;align-items:end;gap:7px;padding:7px;border:1px solid var(--border);border-radius:9px;background:color-mix(in srgb,var(--surface-strong) 82%,transparent)}
+.treat-tax-editor label{display:grid;gap:4px;color:var(--text-muted);font-size:9px;font-weight:800}.treat-tax-editor input{width:92px;min-height:34px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);padding:6px 9px}.treat-tax-editor button{min-height:34px;white-space:nowrap;color:var(--accent);font-weight:800}
 .treat-channel small,.treat-status{color:var(--text-muted);font-size:11px}
 .treat-upload{cursor:pointer;border:1px dashed var(--accent);border-radius:8px;padding:10px;color:var(--accent);font-weight:800}
 .treat-upload input{display:none}.treat-list button{cursor:pointer}

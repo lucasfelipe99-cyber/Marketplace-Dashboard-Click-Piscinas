@@ -2072,6 +2072,13 @@ async function handleSalesTreatersUpdate(request, response) {
       if (duplicate) return sendJson(response, 400, { error: 'Este canal já está cadastrado.' });
       const item = { id: current && current.id || crypto.randomUUID(), marketplace, channelName, taxRate, anticipationRate, freight, commissionBelowRate, commissionBelowFixed, commissionAboveRate, commissionAboveFixed, freightRate, active: payload.active !== false, updatedAt: new Date().toISOString() };
       if (current) Object.assign(current, item); else state.channels.push(item);
+    } else if (payload.action === 'update-tax-rate') {
+      const channel = state.channels.find((item) => item.id === String(payload.id || ''));
+      if (!channel) return sendJson(response, 404, { error: 'Canal não encontrado.' });
+      const taxRate = Number(payload.taxRate);
+      if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) return sendJson(response, 400, { error: 'Informe uma alíquota de imposto válida.' });
+      channel.taxRate = taxRate;
+      channel.updatedAt = new Date().toISOString();
     } else if (payload.action === 'delete-channel') {
       const index = state.channels.findIndex((item) => item.id === String(payload.id || ''));
       if (index < 0) return sendJson(response, 404, { error: 'Canal não encontrado.' });
