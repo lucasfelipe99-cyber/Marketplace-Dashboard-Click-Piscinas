@@ -21,6 +21,8 @@
 .pricing-button.danger { border-color:rgba(255,82,111,.55);background:rgba(255,82,111,.1);color:#ff6682; }
 .pricing-button.danger:hover { background:rgba(255,82,111,.18);border-color:#ff6682; }
 .pricing-cost-hero-actions { display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap; }
+.pricing-required-warning { border-color:rgba(255,187,65,.55);background:rgba(255,187,65,.08);display:flex;flex-direction:column;gap:6px;color:#ffd47a; }
+.pricing-required-warning span { color:#f0c978; }
 .pricing-import-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .pricing-import-buttons .pricing-button { display: inline-flex; align-items: center; justify-content: center; }
 .pricing-results { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }

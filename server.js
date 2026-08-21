@@ -2190,6 +2190,14 @@ async function handleRefreshAllPublishedBases(request, response) {
     metadata.areas.area1.lastBulkRefreshAt = new Date().toISOString();
     metadata.areas.area1.lastBulkRefreshMonths = refreshed.filter((item) => item.status === 'updated').map((item) => item.month);
     writeJsonWithRetry(metadataPath, metadata);
+    const pricingState = readPricingDatabase();
+    if (pricingState.awaitingBaseRefresh) {
+      pricingState.awaitingBaseRefresh = false;
+      pricingState.baseRefreshedAfterCostClearAt = metadata.areas.area1.lastBulkRefreshAt;
+      pricingState.updatedAt = metadata.areas.area1.lastBulkRefreshAt;
+      delete pricingState.pendingCosts;
+      writeJsonWithRetry(pricingDatabasePath, pricingState);
+    }
     setImmediate(() => {
       ensureIntelligentAnalysis(true).catch((error) => console.error('Nao foi possivel atualizar a Analise Inteligente apos a atualizacao geral:', error.message));
     });
@@ -2414,7 +2422,7 @@ async function handlePricingRulesUpdate(request, response) {
 
 function readPricingDatabase() {
   if (!fs.existsSync(pricingDatabasePath)) {
-    return { version: 2, costs: {}, history: [], lastPricing: {}, pendingCosts: findPublishedSkusWithoutCost({}), updatedAt: null };
+    return { version: 2, costs: {}, history: [], lastPricing: {}, pendingCosts: findPublishedSkusWithoutCost({}), awaitingBaseRefresh: false, updatedAt: null };
   }
   try {
     const value = JSON.parse(fs.readFileSync(pricingDatabasePath, 'utf8'));
@@ -2423,9 +2431,13 @@ function readPricingDatabase() {
       costs: value.costs && typeof value.costs === 'object' ? value.costs : {},
       history: Array.isArray(value.history) ? value.history : [],
       lastPricing: value.lastPricing && typeof value.lastPricing === 'object' ? value.lastPricing : {},
+      awaitingBaseRefresh: value.awaitingBaseRefresh === true,
+      costsClearedAt: value.costsClearedAt || null,
+      costsClearedBy: value.costsClearedBy || null,
+      baseRefreshedAfterCostClearAt: value.baseRefreshedAfterCostClearAt || null,
       updatedAt: value.updatedAt || null
     };
-    state.pendingCosts = findPublishedSkusWithoutCost(state.costs);
+    state.pendingCosts = state.awaitingBaseRefresh ? [] : findPublishedSkusWithoutCost(state.costs);
     return state;
   } catch (error) {
     return { version: 2, costs: {}, history: [], lastPricing: {}, pendingCosts: [], updatedAt: null };
@@ -2475,9 +2487,14 @@ async function handlePricingDatabaseUpdate(request, response) {
     const state = readPricingDatabase();
     const now = new Date().toISOString();
 
+    if (state.awaitingBaseRefresh && ['upsert-cost', 'import-costs'].includes(payload.action)) {
+      return sendJson(response, 409, { error: 'Atualize todas as bases no Tratador de Vendas antes de cadastrar novos custos.' });
+    }
+
     if (payload.action === 'clear-costs') {
       if (!requireAdmin(request, response)) return;
       state.costs = {};
+      state.awaitingBaseRefresh = true;
       state.costsClearedAt = now;
       state.costsClearedBy = String(payload.responsible || '').trim() || 'Administrador';
     } else if (payload.action === 'upsert-cost') {
@@ -2558,7 +2575,7 @@ async function handlePricingDatabaseUpdate(request, response) {
     state.updatedAt = now;
     delete state.pendingCosts;
     writeJsonWithRetry(pricingDatabasePath, state);
-    state.pendingCosts = findPublishedSkusWithoutCost(state.costs);
+    state.pendingCosts = state.awaitingBaseRefresh ? [] : findPublishedSkusWithoutCost(state.costs);
     sendJson(response, 200, state);
   } catch (error) {
     sendJson(response, 400, { error: error.message === 'INVALID_JSON' ? 'JSON invalido.' : error.message });
