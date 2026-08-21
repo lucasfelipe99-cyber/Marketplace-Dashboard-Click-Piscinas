@@ -155,6 +155,23 @@
       String(date.getUTCDate()).padStart(2, '0');
   }
 
+  function marketplaceSaleName(marketplace, company) {
+    var market = String(marketplace || '').trim();
+    var account = String(company || '').trim();
+    if (!market) return account;
+    if (!account || normalized(account) === normalized(market)) return market;
+    if (normalized(account).indexOf(normalized(market) + ' ') === 0) return account;
+    return market + ' - ' + account;
+  }
+
+  function productIdentifiers(skuValue, adValue, titleValue, marketplaceSale) {
+    var sku = String(skuValue || '').trim();
+    var ad = String(adValue || '').trim();
+    var title = String(titleValue || '').trim();
+    var fallback = [title, String(marketplaceSale || '').trim()].filter(Boolean).join(' - ') || 'Produto sem identificação';
+    return { sku: sku || ad || fallback, ad: ad || sku || fallback };
+  }
+
   function cellNumber(value, label, rowNumber) {
     if (value === '' || value == null) return 0;
     if (typeof value === 'number') {
@@ -218,10 +235,13 @@
       sourceRows += 1;
       var dateIso = isoDate(date);
       var marketplace = String(row[indexes.Marketplace] || '').trim();
-      var marketplaceSale = String(row[indexes['Marketplace venda']] || '').trim();
-      var sku = String(row[indexes.SKU] || '').trim();
-      var ad = indexes.ad >= 0 ? String(row[indexes.ad] || '').trim() : '';
+      var marketplaceSale = marketplaceSaleName(marketplace, row[indexes['Marketplace venda']]);
+      var rawSku = String(row[indexes.SKU] || '').trim();
+      var rawAd = indexes.ad >= 0 ? String(row[indexes.ad] || '').trim() : '';
       var description = String(row[indexes['Título do anúncio']] || '').trim();
+      var identifiers = productIdentifiers(rawSku, rawAd, description, marketplaceSale);
+      var sku = identifiers.sku;
+      var ad = identifiers.ad;
       metricRules.forEach(function (rule) {
         var value = indexes[rule[0]] < 0 ? 0 : cellNumber(row[indexes[rule[0]]], rule[0], rowIndex + 2);
         // O anúncio e a empresa fazem parte da identidade da venda. Sem o anúncio,
