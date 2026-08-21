@@ -458,9 +458,10 @@
     document.getElementById('clearAllCosts').addEventListener('click', async function () {
       var status = document.getElementById('costStatus');
       var total = Object.keys(database.costs || {}).length;
+      var publishedTotal = (database.pendingCosts || []).length;
       try {
-        if (!total) throw new Error('Não existem cadastros de custo para limpar.');
-        if (!confirm('Apagar todos os ' + total + ' cadastros de custo e limpar a lista de SKUs publicados? Vendas, ADS e arquivos mensais serão preservados, mas será obrigatório atualizar todas as bases novamente.')) return;
+        if (!total && !publishedTotal) throw new Error('Não existem cadastros de custo nem SKUs publicados para limpar.');
+        if (!confirm('Apagar ' + total + ' cadastro(s) de custo e ' + publishedTotal + ' SKU(s) publicado(s)? Vendas, ADS e arquivos mensais serão preservados, mas será obrigatório atualizar todas as bases novamente.')) return;
         var password = prompt('Informe a senha administrativa para confirmar a limpeza:');
         if (!password) return;
         var response = await fetch('/api/pricing-database', {
@@ -474,7 +475,7 @@
         database.lastPricing = database.lastPricing || {};
         document.getElementById('costRegisteredCount').textContent = '0 cadastrados · 0 SKUs publicados';
         status.className = 'pricing-status success';
-        status.textContent = total + ' cadastro(s) removido(s), incluindo a lista de SKUs publicados. Acesse o Tratador de Vendas e clique em “Atualizar todas as bases” antes de continuar.';
+        status.textContent = total + ' cadastro(s) de custo e ' + publishedTotal + ' SKU(s) publicado(s) removido(s). Acesse o Tratador de Vendas e clique em “Atualizar todas as bases” antes de continuar.';
         table();
         alert('Limpeza concluída. É obrigatório acessar o Tratador de Vendas e clicar em “Atualizar todas as bases” para reconstruir os SKUs e recalcular as planilhas.');
       } catch (error) {
