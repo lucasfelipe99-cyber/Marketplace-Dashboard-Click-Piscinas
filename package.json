@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "publish:clients": "git push origin HEAD:main && git push patas HEAD:main"
   },
   "engines": {
     "node": ">=18"

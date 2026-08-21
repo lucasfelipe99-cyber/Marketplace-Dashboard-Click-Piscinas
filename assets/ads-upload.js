@@ -151,9 +151,8 @@
         return '<details class="ads-account-month'+(rows.length?' is-filled':'')+'"><summary><span><strong>'+name+' / '+year+'</strong><small>'+(rows.length?rows.length+' subida(s)':'Ainda não alimentado')+'</small></span><i aria-hidden="true">⌄</i></summary><div class="ads-account-month-content">'+(rows.length?rows.map(uploadMarkup).join(''):'<p>Nenhum arquivo cadastrado neste mês.</p>')+'</div></details>';
       }).join('');
       var treatedCount=accountRows.filter(function(item){return item.status==='treated'||item.status==='published';}).length;
-      return '<article class="ads-account-card" data-ads-account="'+escapeHtml(account.account)+'" data-ads-platform="'+escapeHtml(account.marketplace)+'"><header><div><span>'+escapeHtml(account.marketplace)+'</span><h3>'+escapeHtml(account.account)+'</h3></div><div class="ads-account-controls"><label>Ano<input data-card-year type="number" min="2020" max="2100" value="'+year+'"></label><label>Mês<select data-card-month>'+monthOptions+'</select></label><label>Dia<select data-card-day></select></label><label class="ads-card-file">Selecionar relatório bruto<input data-card-file type="file" accept=".xlsx,.xlsm,.xls,.csv,.zip,.txt"></label><button type="button" data-card-save>Tratar e salvar</button><button type="button" data-republish-all'+(treatedCount?'':' disabled')+'>Republicar todas as bases de ADS</button></div></header><div class="ads-account-meta">'+accountRows.length+' subida(s) armazenada(s) no disco persistente · '+treatedCount+' pronta(s) para republicar</div><div class="ads-account-operation" data-account-status></div><h4 class="ads-monthly-title">Controle mensal de arquivos</h4><div class="ads-account-month-grid">'+months+'</div></article>';
+      return '<article class="ads-account-card" data-ads-account="'+escapeHtml(account.account)+'" data-ads-platform="'+escapeHtml(account.marketplace)+'" data-card-year="'+defaultYear+'"><header><div><span>'+escapeHtml(account.marketplace)+'</span><h3>'+escapeHtml(account.account)+'</h3></div><div class="ads-account-controls"><label>Mês<select data-card-month>'+monthOptions+'</select></label><label class="ads-card-file">Selecionar relatórios brutos<input data-card-file type="file" multiple accept=".xlsx,.xlsm,.xls,.csv,.zip,.txt"></label><button type="button" data-card-save>Tratar e salvar arquivos</button><button type="button" data-republish-all'+(treatedCount?'':' disabled')+'>Republicar todas as bases de ADS</button></div></header><div class="ads-account-meta">O dia é identificado automaticamente pelo nome de cada arquivo (ex.: 1.xlsx = dia 1). · '+accountRows.length+' subida(s) armazenada(s) no disco persistente · '+treatedCount+' pronta(s) para republicar</div><div class="ads-account-operation" data-account-status></div><h4 class="ads-monthly-title">Controle mensal de arquivos</h4><div class="ads-account-month-grid">'+months+'</div></article>';
     }).join('');
-    historyBox.querySelectorAll('.ads-account-card').forEach(function(card){refreshCardDays(card);});
   }
   async function loadHistory(){try{var response=await fetch('/api/ads-treater/uploads',{cache:'no-store'}),result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível carregar o histórico.');uploadHistory=result.uploads||[];renderHistory();}catch(error){historyBox.innerHTML='<div class="ads-treater-empty">'+escapeHtml(error.message)+'</div>';historySummary.textContent='Falha ao carregar';}}
   async function publishTreatedUpload(item,password){
@@ -165,7 +164,14 @@
     if(!response.ok)throw new Error(result.error||'Não foi possível publicar a subida '+item.sequence+'.');
     return result;
   }
-  function refreshCardDays(card){var year=Number(card.querySelector('[data-card-year]').value),month=Number(card.querySelector('[data-card-month]').value),day=card.querySelector('[data-card-day]'),previous=Number(day.value)||new Date().getDate(),total=new Date(year,month,0).getDate();day.innerHTML=Array.from({length:total},function(_,i){return '<option value="'+(i+1)+'">'+(i+1)+'</option>';}).join('');day.value=String(Math.min(previous,total));}
+  function dayFromFileName(fileName,year,month){
+    var base=String(fileName||'').replace(/\.[^.]+$/,'').trim();
+    var match=base.match(/^(\d{1,2})(?:\D|$)/);
+    if(!match)throw new Error('O arquivo "'+fileName+'" precisa começar com o dia do mês. Exemplo: 1.xlsx.');
+    var day=Number(match[1]),lastDay=new Date(Number(year),Number(month),0).getDate();
+    if(day<1||day>lastDay)throw new Error('O dia '+day+' do arquivo "'+fileName+'" não é válido para o mês selecionado.');
+    return day;
+  }
   function parseMatrix(matrix) {
     if (!matrix.length) throw new Error('Arquivo vazio.');
     var headers = matrix[0].map(clean);
@@ -216,12 +222,46 @@
       }catch(error){bulkStatus.textContent=error.message;alert(error.message);}finally{bulkButton.disabled=false;bulkButton.textContent='Republicar todas as bases de ADS';}
       return;
     }
-    if(event.target.matches('[data-card-save]')){var accountCard=event.target.closest('.ads-account-card'),button=event.target,account=accountCard.getAttribute('data-ads-account'),platform=accountCard.getAttribute('data-ads-platform'),year=accountCard.querySelector('[data-card-year]').value,month=accountCard.querySelector('[data-card-month]').value,day=accountCard.querySelector('[data-card-day]').value,file=accountCard.querySelector('[data-card-file]').files[0],password=document.getElementById('adsUploadPassword').value,transformed=null;try{if(!file)throw new Error('Selecione o arquivo diário de ADS desta conta.');if(!password)throw new Error('Informe a senha administrativa no painel abaixo.');button.disabled=true;button.textContent='Conferindo...';if(platform==='Mercado Livre'){transformed=parseMercadoLivreRaw(await readRawWorkbook(file),account);var selectedDate=[year,String(month).padStart(2,'0'),String(day).padStart(2,'0')].join('-');if(transformed.rows.some(function(row){return row.date!==selectedDate;}))throw new Error('As datas do relatório não correspondem ao dia selecionado ('+selectedDate.split('-').reverse().join('/')+').');}button.textContent='Salvando...';var response=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'add',platform:platform,account:account,year:Number(year),month:Number(month),day:Number(day),fileName:file.name,dataBase64:await fileBase64(file)})}),result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível salvar.');if(transformed){var treatedResponse=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'save-treated',id:result.upload.id,rows:transformed.rows})}),treatedResult=await treatedResponse.json();if(!treatedResponse.ok)throw new Error(treatedResult.error||'O bruto foi salvo, mas o tratamento falhou.');uploadHistory=treatedResult.uploads||[];alert('Subida '+result.upload.sequence+' salva e tratada: '+transformed.ads.toLocaleString('pt-BR')+' anúncios e '+transformed.rows.length.toLocaleString('pt-BR')+' linhas para a base.');}else{uploadHistory=result.uploads||[];alert('Arquivo salvo como subida '+result.upload.sequence+'. O tratador desta plataforma ainda será configurado.');}renderHistory();}catch(error){alert(error.message);}finally{button.disabled=false;button.textContent='Tratar e salvar';}return;}
+    if(event.target.matches('[data-card-save]')){
+      var accountCard=event.target.closest('.ads-account-card'),button=event.target,account=accountCard.getAttribute('data-ads-account'),platform=accountCard.getAttribute('data-ads-platform'),year=Number(accountCard.getAttribute('data-card-year'))||new Date().getFullYear(),month=Number(accountCard.querySelector('[data-card-month]').value),files=Array.from(accountCard.querySelector('[data-card-file]').files||[]),password=document.getElementById('adsUploadPassword').value,accountStatus=accountCard.querySelector('[data-account-status]');
+      try{
+        if(!files.length)throw new Error('Selecione um ou mais arquivos diários de ADS desta conta.');
+        if(!password)throw new Error('Informe a senha administrativa no painel abaixo.');
+        var prepared=files.map(function(file){return{file:file,day:dayFromFileName(file.name,year,month)};}).sort(function(a,b){return a.day-b.day||a.file.name.localeCompare(b.file.name);});
+        button.disabled=true;
+        var completed=0,totalRows=0,totalAds=0;
+        for(var fileIndex=0;fileIndex<prepared.length;fileIndex+=1){
+          var current=prepared[fileIndex],file=current.file,day=current.day,transformed=null;
+          button.textContent='Tratando '+(fileIndex+1)+' de '+prepared.length+'...';
+          accountStatus.textContent='Dia '+day+' · '+file.name;
+          if(platform==='Mercado Livre'){
+            transformed=parseMercadoLivreRaw(await readRawWorkbook(file),account);
+            var selectedDate=[year,String(month).padStart(2,'0'),String(day).padStart(2,'0')].join('-');
+            transformed.rows.forEach(function(row){row.date=selectedDate;});
+            transformed.minDate=selectedDate;transformed.maxDate=selectedDate;
+          }
+          var response=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'add',platform:platform,account:account,year:year,month:month,day:day,fileName:file.name,dataBase64:await fileBase64(file)})}),result=await response.json();
+          if(!response.ok)throw new Error(result.error||'Não foi possível salvar "'+file.name+'".');
+          if(transformed){
+            var treatedResponse=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'save-treated',id:result.upload.id,rows:transformed.rows})}),treatedResult=await treatedResponse.json();
+            if(!treatedResponse.ok)throw new Error(treatedResult.error||'O arquivo "'+file.name+'" foi salvo, mas o tratamento falhou.');
+            uploadHistory=treatedResult.uploads||[];totalRows+=transformed.rows.length;totalAds+=transformed.ads;
+          }else uploadHistory=result.uploads||[];
+          completed+=1;
+        }
+        var successMessage=completed+' arquivo(s) salvo(s) com sucesso. '+(platform==='Mercado Livre'?totalAds.toLocaleString('pt-BR')+' anúncios e '+totalRows.toLocaleString('pt-BR')+' linhas tratadas.':'Prontos para configurar o tratamento.')+' Dias identificados pelo nome dos arquivos.';
+        accountStatus.innerHTML='<strong>'+successMessage+'</strong>';
+        accountCard.querySelector('[data-card-file]').value='';
+        renderHistory();
+        alert(successMessage);
+      }catch(error){accountStatus.textContent=error.message;alert(error.message);}
+      finally{button.disabled=false;button.textContent='Tratar e salvar arquivos';}
+      return;
+    }
     var card=event.target.closest('[data-upload-id]');if(!card)return;var id=card.getAttribute('data-upload-id'),item=uploadHistory.find(function(entry){return entry.id===id;});if(!item)return;
     if(event.target.matches('[data-delete-upload]')){if(!confirm('Excluir a subida '+item.sequence+' do dia '+item.day+'? O arquivo será removido do disco.'))return;var password=prompt('Informe a senha administrativa para excluir:');if(!password)return;try{var response=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'delete',id:id})}),result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível excluir.');uploadHistory=result.uploads||[];renderHistory();}catch(error){alert(error.message);}return;}
     if(event.target.closest('[data-add-upload]')){try{var password=document.getElementById('adsUploadPassword').value||prompt('Informe a senha administrativa para republicar esta base de ADS:');if(!password)return;statusBox.textContent='Carregando o resultado tratado da subida '+item.sequence+'...';var result=await publishTreatedUpload(item,password);statusBox.innerHTML='<strong>Arquivo tratado publicado</strong><br>'+result.added.toLocaleString('pt-BR')+' linhas adicionadas à Base de Dados e disponibilizadas aos painéis.';await loadHistory();}catch(error){statusBox.textContent=error.message;alert(error.message);}return;}
   });
-  historyBox.addEventListener('change',function(event){if(event.target.matches('[data-card-year],[data-card-month]'))refreshCardDays(event.target.closest('.ads-account-card'));});
   document.getElementById('adsUploadRead').onclick = async function () {
     try {
       var file = fileInput.files[0]; if (!file) throw new Error('Selecione o arquivo de ADS.');
