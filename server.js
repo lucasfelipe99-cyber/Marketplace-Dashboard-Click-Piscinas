@@ -2475,7 +2475,12 @@ async function handlePricingDatabaseUpdate(request, response) {
     const state = readPricingDatabase();
     const now = new Date().toISOString();
 
-    if (payload.action === 'upsert-cost') {
+    if (payload.action === 'clear-costs') {
+      if (!requireAdmin(request, response)) return;
+      state.costs = {};
+      state.costsClearedAt = now;
+      state.costsClearedBy = String(payload.responsible || '').trim() || 'Administrador';
+    } else if (payload.action === 'upsert-cost') {
       const sku = String(payload.sku || '').trim();
       if (!sku) return sendJson(response, 400, { error: 'Informe o SKU.' });
       const productCost = validNonNegativeNumber(payload.productCost, 'Custo do produto');

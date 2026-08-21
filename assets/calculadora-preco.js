@@ -408,7 +408,7 @@
 
   function renderCostRegistration() {
     var pendingImport = [];
-    costContainer.innerHTML = '<div class="pricing-page"><section class="pricing-card pricing-hero"><div class="pricing-heading"><strong>Cadastro de Custos por SKU</strong><span>Os produtos sem custo aparecem automaticamente em vermelho para cadastro.</span></div><span class="inventory-link" id="costRegisteredCount">' + Object.keys(database.costs || {}).length + ' cadastrados · ' + (database.pendingCosts || []).length + ' pendentes</span></section>' +
+    costContainer.innerHTML = '<div class="pricing-page"><section class="pricing-card pricing-hero"><div class="pricing-heading"><strong>Cadastro de Custos por SKU</strong><span>Os produtos sem custo aparecem automaticamente em vermelho para cadastro.</span></div><div class="pricing-cost-hero-actions"><span class="inventory-link" id="costRegisteredCount">' + Object.keys(database.costs || {}).length + ' cadastrados · ' + (database.pendingCosts || []).length + ' pendentes</span><button class="pricing-button danger" id="clearAllCosts" type="button">Limpar todos os cadastros</button></div></section>' +
       '<section class="pricing-card pricing-import"><div class="pricing-import-head"><div><strong>Importar cadastro por planilha</strong><span>Baixe o modelo, preencha a aba PRECIFIQUE 2.0 e envie o arquivo XLSX.</span></div><div class="pricing-import-buttons"><button class="pricing-button" id="costTemplateDownload" type="button">Baixar base</button><label class="pricing-button primary" for="costCsvFile">Selecionar planilha</label></div><input id="costCsvFile" type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden></div>' +
       '<div class="pricing-import-map"><span>DE → PARA</span><b>Custo Total → Custo do produto</b><b>Comprimento (cm) → Comprimento</b><b>Peso (gramas) → Peso real (kg)</b></div>' +
       '<div id="costImportPreview" class="pricing-import-preview">Selecione o arquivo preenchido para conferir antes de importar.</div><div class="pricing-import-actions"><button class="pricing-button primary" id="costImportButton" type="button" disabled>Importar produtos</button></div><div class="pricing-status" id="costImportStatus"></div></section>' +
@@ -448,6 +448,32 @@
         downloadCostTemplate();
         status.className = 'pricing-status success';
         status.textContent = 'Modelo baixado. Preencha a aba PRECIFIQUE 2.0 e envie o mesmo arquivo aqui.';
+      } catch (error) {
+        status.className = 'pricing-status error';
+        status.textContent = error.message;
+      }
+    });
+    document.getElementById('clearAllCosts').addEventListener('click', async function () {
+      var status = document.getElementById('costStatus');
+      var total = Object.keys(database.costs || {}).length;
+      try {
+        if (!total) throw new Error('Não existem cadastros de custo para limpar.');
+        if (!confirm('Apagar todos os ' + total + ' cadastros de custo? Vendas, ADS e demais bases não serão apagados.')) return;
+        var password = prompt('Informe a senha administrativa para confirmar a limpeza:');
+        if (!password) return;
+        var response = await fetch('/api/pricing-database', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Password': password },
+          body: JSON.stringify({ action: 'clear-costs', responsible: localStorage.getItem('pricingLastUser') || 'Administrador' })
+        });
+        var result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Não foi possível limpar os cadastros.');
+        database = result;
+        database.lastPricing = database.lastPricing || {};
+        document.getElementById('costRegisteredCount').textContent = '0 cadastrados · ' + (database.pendingCosts || []).length + ' pendentes';
+        status.className = 'pricing-status success';
+        status.textContent = total + ' cadastro(s) de custo removido(s). Os SKUs publicados voltaram para pendentes.';
+        table();
       } catch (error) {
         status.className = 'pricing-status error';
         status.textContent = error.message;
