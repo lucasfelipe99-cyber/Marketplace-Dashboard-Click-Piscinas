@@ -1150,6 +1150,36 @@ function normalizeAdsTitle(value) {
   return normalizeAdsText(value).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function adsTitleSimilarity(left, right) {
+  const a = normalizeAdsTitle(left);
+  const b = normalizeAdsTitle(right);
+  if (!a || !b) return 0;
+  if (a === b || a.replace(/\s/g, '') === b.replace(/\s/g, '')) return 1;
+  const aTokens = new Set(a.split(' ').filter((token) => token.length > 1));
+  const bTokens = new Set(b.split(' ').filter((token) => token.length > 1));
+  const common = Array.from(aTokens).filter((token) => bTokens.has(token)).length;
+  if (common < 3) return 0;
+  const dice = (2 * common) / (aTokens.size + bTokens.size);
+  const containment = Math.min(a.length, b.length) >= 12 && (a.includes(b) || b.includes(a))
+    ? Math.min(a.length, b.length) / Math.max(a.length, b.length) : 0;
+  return Math.max(dice, containment);
+}
+
+function findAdsSaleByTitle(title, saleKeys, exactTitles, candidatesBySale) {
+  const normalizedTitle = normalizeAdsTitle(title);
+  if (!normalizedTitle) return null;
+  for (const sale of saleKeys) {
+    const exactKey = sale + '||' + normalizedTitle;
+    if (exactTitles.has(exactKey)) return exactTitles.get(exactKey);
+  }
+  const candidates = saleKeys.flatMap((sale) => candidatesBySale.get(sale) || []);
+  const ranked = candidates.map((item) => ({ item, score: adsTitleSimilarity(normalizedTitle, item.normalizedTitle) }))
+    .filter((entry) => entry.score >= 0.82)
+    .sort((a, b) => b.score - a.score);
+  if (!ranked.length || (ranked[1] && ranked[0].score - ranked[1].score < 0.08)) return null;
+  return ranked[0].item;
+}
+
 function adsDateKey(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -1372,6 +1402,7 @@ async function handleAdsBaseUpload(request, response) {
     });
 
     const descriptionData = new Map();
+    const descriptionCandidates = new Map();
     savedRows.slice(1).forEach((row) => {
       if (isAdsMetricRow(row, indexes) || indexes.description < 0) return;
       const title = normalizeAdsTitle(row[indexes.description]);
@@ -1379,17 +1410,26 @@ async function handleAdsBaseUpload(request, response) {
       if (!title || !sale) return;
       const sku = indexes.sku >= 0 ? String(row[indexes.sku] || '').trim() : '';
       const ad = indexes.ad >= 0 ? String(row[indexes.ad] || '').trim() : '';
-      const current = descriptionData.get(sale + '||' + title);
-      if (!current || (!current.sku && sku)) descriptionData.set(sale + '||' + title, { sku, ad, description: String(row[indexes.description] || '').trim(), category2: indexes.category2 >= 0 ? String(row[indexes.category2] || '').trim() : '' });
+      const item = { sku, ad, description: String(row[indexes.description] || '').trim(), category2: indexes.category2 >= 0 ? String(row[indexes.category2] || '').trim() : '', normalizedTitle: title };
+      const exactKey = sale + '||' + title;
+      if (!descriptionData.has(exactKey)) descriptionData.set(exactKey, item);
+      else {
+        const current = descriptionData.get(exactKey);
+        if (current && (normalizeAdsText(current.sku) !== normalizeAdsText(sku) || normalizeAdsText(current.ad) !== normalizeAdsText(ad))) descriptionData.set(exactKey, null);
+      }
+      const candidates = descriptionCandidates.get(sale) || [];
+      if (!candidates.some((candidate) => candidate.normalizedTitle === title && normalizeAdsText(candidate.sku) === normalizeAdsText(sku) && normalizeAdsText(candidate.ad) === normalizeAdsText(ad))) candidates.push(item);
+      descriptionCandidates.set(sale, candidates);
     });
 
     const resolvedIncomingRows = incomingRows.map((source) => {
       const sourceSku = String(source.sku || '').trim();
       const sourceAd = String(source.ad || '').trim();
       const sourceTitle = normalizeAdsTitle(source.title || source.description);
+      const titleSaleKeys = Array.from(new Set([marketplaceSaleKey, normalizeAdsText(account)]));
       const knownByAd = adData.get(marketplaceSaleKey + '||' + normalizeAdsText(sourceAd)) || adData.get(normalizeAdsText(account) + '||' + normalizeAdsText(sourceAd));
       const knownBySku = skuData.get(normalizeAdsText(sourceSku));
-      const knownByTitle = sourceTitle ? descriptionData.get(marketplaceSaleKey + '||' + sourceTitle) || descriptionData.get(normalizeAdsText(account) + '||' + sourceTitle) : null;
+      const knownByTitle = !knownByAd && !knownBySku ? findAdsSaleByTitle(sourceTitle, titleSaleKeys, descriptionData, descriptionCandidates) : null;
       const known = knownByAd || knownBySku || knownByTitle || {};
       return Object.assign({}, source, {
         sku: known.sku || sourceSku,
