@@ -10,11 +10,52 @@
   var searchText = '';
   var pendingOnly = false;
   var bulkCategoryId = '';
+  var categoryImportRows = null;
 
   function escapeValue(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
     });
+  }
+
+  function normalizeText(value) {
+    return String(value == null ? '' : value).trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  function exportSkuCategories() {
+    if (!window.XLSX) throw new Error('O componente de Excel ainda não terminou de carregar.');
+    var categoryNames = Object.fromEntries((master.categories || []).map(function (item) { return [item.id, item.name]; }));
+    var rows = [['SKU', 'Descrição', 'Marketplace', 'Categoria oficial']].concat(Object.values(master.skus || {}).sort(function (a, b) {
+      return String(a.sku).localeCompare(String(b.sku), 'pt-BR');
+    }).map(function (item) { return [String(item.sku || ''), item.description || '', item.marketplace || '', categoryNames[item.categoryId] || '']; }));
+    var categoryRows = [['Categorias disponíveis']].concat((master.categories || []).map(function (item) { return [item.name]; }));
+    var workbook = XLSX.utils.book_new();
+    var skuSheet = XLSX.utils.aoa_to_sheet(rows), categorySheet = XLSX.utils.aoa_to_sheet(categoryRows);
+    skuSheet['!cols'] = [{ wch: 24 }, { wch: 65 }, { wch: 24 }, { wch: 34 }];
+    skuSheet['!autofilter'] = { ref: 'A1:D' + rows.length };
+    categorySheet['!cols'] = [{ wch: 42 }];
+    ['A1', 'B1', 'C1', 'D1'].forEach(function (cell) { if (skuSheet[cell]) skuSheet[cell].s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '2563EB' } } }; });
+    if (categorySheet.A1) categorySheet.A1.s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '2563EB' } } };
+    XLSX.utils.book_append_sheet(workbook, skuSheet, 'Cadastro de SKU');
+    XLSX.utils.book_append_sheet(workbook, categorySheet, 'Categorias disponíveis');
+    XLSX.writeFile(workbook, 'Cadastro_de_SKU_para_categorizar_' + new Date().toISOString().slice(0, 10) + '.xlsx', { bookType: 'xlsx', cellStyles: true });
+  }
+
+  async function readSkuCategoryWorkbook(file) {
+    if (!window.XLSX) throw new Error('O componente de Excel ainda não terminou de carregar.');
+    var workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: true });
+    var sheetName = workbook.SheetNames.find(function (name) { return normalizeText(name) === 'cadastro de sku'; }) || workbook.SheetNames[0];
+    var matrix = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: true });
+    if (!matrix.length) throw new Error('A planilha está vazia.');
+    var headers = matrix[0].map(normalizeText);
+    var skuIndex = headers.indexOf('sku'), categoryIndex = headers.indexOf('categoria oficial');
+    if (skuIndex < 0 || categoryIndex < 0) throw new Error('A planilha precisa conter as colunas SKU e Categoria oficial.');
+    var rows = matrix.slice(1).map(function (row) { return { sku: String(row[skuIndex] == null ? '' : row[skuIndex]).trim(), categoryName: String(row[categoryIndex] == null ? '' : row[categoryIndex]).trim() }; }).filter(function (row) { return row.sku && row.categoryName; });
+    if (!rows.length) throw new Error('Nenhuma categoria foi preenchida na planilha.');
+    var knownCategories = new Set((master.categories || []).map(function (item) { return normalizeText(item.name); }));
+    var unknown = Array.from(new Set(rows.map(function (row) { return row.categoryName; }).filter(function (name) { return !knownCategories.has(normalizeText(name)); })));
+    if (unknown.length) throw new Error('Categorias não cadastradas: ' + unknown.slice(0, 12).join(', ') + '. Use os nomes da aba Categorias disponíveis.');
+    return rows;
   }
 
   async function loadMaster(force) {
@@ -157,7 +198,10 @@
       '<option value="pending"' + (pendingOnly ? ' selected' : '') + '>Somente pendentes</option></select></div>' +
       '<div class="product-master-field"><label for="skuBulkCategory">Categoria para os filtrados</label><select id="skuBulkCategory">' +
       categoryOptions(bulkCategoryId) + '</select></div><button class="product-master-button" id="assignFilteredSkus" type="button"' +
-      (!visible.length ? ' disabled' : '') + '>Enviar ' + visible.length.toLocaleString('pt-BR') + ' para categoria</button></div></section>' +
+      (!visible.length ? ' disabled' : '') + '>Enviar ' + visible.length.toLocaleString('pt-BR') + ' para categoria</button>' +
+      '<div class="product-master-file-actions"><button class="product-master-button secondary" id="exportSkuCategories" type="button">Baixar Excel</button>' +
+      '<label class="product-master-file-button">Selecionar Excel<input id="importSkuCategoriesFile" type="file" accept=".xlsx,.xls"></label>' +
+      '<button class="product-master-button" id="importSkuCategories" type="button" disabled>Importar categorias</button></div></div></section>' +
       '<div class="product-master-status" id="skuStatus"></div>' +
       '<section class="product-master-card"><div class="product-master-stats"><div class="product-master-stat"><strong>' +
       all.length.toLocaleString('pt-BR') + '</strong><span>SKUs cadastrados</span></div><div class="product-master-stat"><strong>' +
@@ -217,6 +261,34 @@
         status.textContent = error.message;
         button.disabled = false;
       }
+    });
+    document.getElementById('exportSkuCategories').addEventListener('click', function () {
+      var status = document.getElementById('skuStatus');
+      try { exportSkuCategories(); status.className = 'product-master-status success'; status.textContent = 'Excel gerado com todos os SKUs e as categorias disponíveis.'; }
+      catch (error) { status.className = 'product-master-status error'; status.textContent = error.message; }
+    });
+    document.getElementById('importSkuCategoriesFile').addEventListener('change', async function () {
+      var status = document.getElementById('skuStatus'), importButton = document.getElementById('importSkuCategories');
+      categoryImportRows = null; importButton.disabled = true;
+      try {
+        if (!this.files[0]) return;
+        categoryImportRows = await readSkuCategoryWorkbook(this.files[0]);
+        importButton.disabled = false; status.className = 'product-master-status success';
+        status.textContent = categoryImportRows.length.toLocaleString('pt-BR') + ' SKU(s) categorizados prontos para importar.';
+      } catch (error) { status.className = 'product-master-status error'; status.textContent = error.message; }
+    });
+    document.getElementById('importSkuCategories').addEventListener('click', async function () {
+      var button = this, status = document.getElementById('skuStatus');
+      if (!categoryImportRows || !categoryImportRows.length) return;
+      if (!window.confirm('Importar as categorias preenchidas para ' + categoryImportRows.length.toLocaleString('pt-BR') + ' SKU(s)?')) return;
+      try {
+        button.disabled = true; status.className = 'product-master-status'; status.textContent = 'Validando e importando categorias...';
+        var importedCount = categoryImportRows.length;
+        await updateMaster({ action: 'import-categories', rows: categoryImportRows });
+        categoryImportRows = null; renderSkus();
+        document.getElementById('skuStatus').className = 'product-master-status success';
+        document.getElementById('skuStatus').textContent = importedCount.toLocaleString('pt-BR') + ' SKU(s) conferidos e categorizados. Atualize as categorias na Base de Dados quando desejar publicar a mudança.';
+      } catch (error) { status.className = 'product-master-status error'; status.textContent = error.message; button.disabled = false; }
     });
     skuContainer.querySelectorAll('.sku-category-select').forEach(function (select) {
       select.addEventListener('change', async function () {

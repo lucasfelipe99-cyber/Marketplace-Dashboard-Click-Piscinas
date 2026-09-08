@@ -6,6 +6,7 @@ const os = require('os');
 const { transformShopee } = require('./lib/shopee-transform');
 const { transformTikTok, transformAmazon, transformMagalu } = require('./lib/marketplace-transforms');
 const { createSystemBackup, listSystemBackups, resetSystemData, restoreSystemBackup } = require('./lib/system-data-backups');
+const { applyProductCategoryImport } = require('./lib/product-category-import');
 
 
 function loadLocalEnv(filePath) {
@@ -1990,6 +1991,9 @@ async function handleProductMasterUpdate(request, response) {
       skus.forEach((sku) => {
         if (master.skus[sku]) master.skus[sku].categoryId = categoryId;
       });
+    } else if (payload.action === 'import-categories') {
+      const summary = applyProductCategoryImport(master, payload.rows);
+      master.lastCategoryImport = { ...summary, importedAt: new Date().toISOString() };
     } else {
       return sendJson(response, 400, { error: 'Acao invalida.' });
     }
