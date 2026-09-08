@@ -1146,6 +1146,10 @@ function normalizeAdsText(value) {
     .toLowerCase();
 }
 
+function normalizeAdsTitle(value) {
+  return normalizeAdsText(value).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function adsDateKey(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -1284,7 +1288,7 @@ async function handleAdsBaseUpload(request, response) {
     const marketplaceSale = adsMarketplaceSaleName(platform, account);
     const marketplaceSaleKey = normalizeAdsText(marketplaceSale);
     const incomingRows = Array.isArray(payload.rows) ? payload.rows : [];
-    if (!month || !account || !['mercado livre', 'shopee', 'tiktok'].includes(platformKey)) {
+    if (!month || !account || !['mercado livre', 'shopee', 'tiktok', 'magalu'].includes(platformKey)) {
       sendJson(response, 400, { error: 'Selecione um mês e uma plataforma válidos.' });
       return;
     }
@@ -1347,17 +1351,19 @@ async function handleAdsBaseUpload(request, response) {
     const skuData = new Map();
     const adData = new Map();
     savedRows.slice(1).forEach((row) => {
+      if (isAdsMetricRow(row, indexes)) return;
       const sku = normalizeAdsText(row[indexes.sku]);
       const ad = indexes.ad >= 0 ? normalizeAdsText(row[indexes.ad]) : '';
       const sale = indexes.sale >= 0 ? normalizeAdsText(row[indexes.sale]) : '';
       if (!sku && !ad) return;
-      const current = skuData.get(sku) || { sku: String(row[indexes.sku] || '').trim(), description: '', category2: '' };
+      const current = skuData.get(sku) || { sku: String(row[indexes.sku] || '').trim(), ad: indexes.ad >= 0 ? String(row[indexes.ad] || '').trim() : '', description: '', category2: '' };
+      if (!current.ad && indexes.ad >= 0) current.ad = String(row[indexes.ad] || '').trim();
       if (indexes.description >= 0 && !current.description) current.description = String(row[indexes.description] || '').trim();
       if (indexes.category2 >= 0 && !current.category2) current.category2 = String(row[indexes.category2] || '').trim();
       if (sku) skuData.set(sku, current);
       if (ad && sale) {
         const adKey = sale + '||' + ad;
-        const knownAd = adData.get(adKey) || { sku: current.sku || '', description: '', category2: '' };
+        const knownAd = adData.get(adKey) || { sku: current.sku || '', ad: String(row[indexes.ad] || '').trim(), description: '', category2: '' };
         if (!knownAd.sku && current.sku) knownAd.sku = current.sku;
         if (!knownAd.description && current.description) knownAd.description = current.description;
         if (!knownAd.category2 && current.category2) knownAd.category2 = current.category2;
@@ -1365,9 +1371,36 @@ async function handleAdsBaseUpload(request, response) {
       }
     });
 
+    const descriptionData = new Map();
+    savedRows.slice(1).forEach((row) => {
+      if (isAdsMetricRow(row, indexes) || indexes.description < 0) return;
+      const title = normalizeAdsTitle(row[indexes.description]);
+      const sale = indexes.sale >= 0 ? normalizeAdsText(row[indexes.sale]) : '';
+      if (!title || !sale) return;
+      const sku = indexes.sku >= 0 ? String(row[indexes.sku] || '').trim() : '';
+      const ad = indexes.ad >= 0 ? String(row[indexes.ad] || '').trim() : '';
+      const current = descriptionData.get(sale + '||' + title);
+      if (!current || (!current.sku && sku)) descriptionData.set(sale + '||' + title, { sku, ad, description: String(row[indexes.description] || '').trim(), category2: indexes.category2 >= 0 ? String(row[indexes.category2] || '').trim() : '' });
+    });
+
+    const resolvedIncomingRows = incomingRows.map((source) => {
+      const sourceSku = String(source.sku || '').trim();
+      const sourceAd = String(source.ad || '').trim();
+      const sourceTitle = normalizeAdsTitle(source.title || source.description);
+      const knownByAd = adData.get(marketplaceSaleKey + '||' + normalizeAdsText(sourceAd)) || adData.get(normalizeAdsText(account) + '||' + normalizeAdsText(sourceAd));
+      const knownBySku = skuData.get(normalizeAdsText(sourceSku));
+      const knownByTitle = sourceTitle ? descriptionData.get(marketplaceSaleKey + '||' + sourceTitle) || descriptionData.get(normalizeAdsText(account) + '||' + sourceTitle) : null;
+      const known = knownByAd || knownBySku || knownByTitle || {};
+      return Object.assign({}, source, {
+        sku: known.sku || sourceSku,
+        ad: known.ad || sourceAd || known.sku || sourceSku,
+        matchedBy: knownByAd ? 'ad' : knownBySku ? 'sku' : knownByTitle ? 'title' : ''
+      });
+    });
+
     const uniqueIncomingRows = [];
     const incomingIndexes = new Map();
-    incomingRows.forEach((row) => {
+    resolvedIncomingRows.forEach((row) => {
       const key = [platformKey, marketplaceSaleKey, normalizeAdsText(row.ad), adsDateKey(row.date),
         normalizeAdsText(row.category), normalizeAdsText(row.subcategory)].join('||');
       if (incomingIndexes.has(key)) uniqueIncomingRows[incomingIndexes.get(key)] = row;
@@ -1383,16 +1416,21 @@ async function handleAdsBaseUpload(request, response) {
       sendJson(response, 400, { error: 'O arquivo possui datas fora do mês selecionado. Escolha o mês correto antes de publicar.' });
       return;
     }
-    // ADS complementa a Base de Vendas. Nunca removemos linhas de venda nem
-    // métricas de outros dias: somente substituímos a mesma métrica do mesmo
-    // anúncio, conta e data para permitir a republicação sem duplicidade.
+    // ADS complementa a Base de Vendas e nunca remove vendas. Nas bases diárias,
+    // substitui apenas a mesma métrica do anúncio/data. Na base unificada Magalu,
+    // substitui todas as métricas de ADS da conta e do mês selecionados.
     const keptRows = savedRows.slice(1);
     let replaced = 0;
     const incomingMetricKeys = new Set(uniqueIncomingRows.map((source) => [platformKey, marketplaceSaleKey,
       normalizeAdsText(source.ad), adsDateKey(source.date), normalizeAdsText(source.category), normalizeAdsText(source.subcategory)].join('||')));
+    const replaceChannelMonth = payload.replaceChannelMonth === true && platformKey === 'magalu';
     for (let index = keptRows.length - 1; index >= 0; index -= 1) {
       const row = keptRows[index];
       if (!isAdsMetricRow(row, indexes)) continue;
+      const samePlatform = normalizeAdsText(row[indexes.marketplace]) === platformKey;
+      const savedSale = indexes.sale >= 0 ? normalizeAdsText(row[indexes.sale]) : '';
+      const sameAccount = savedSale === marketplaceSaleKey || savedSale === normalizeAdsText(account);
+      if (replaceChannelMonth && samePlatform && sameAccount) { keptRows.splice(index, 1); replaced += 1; continue; }
       const rowSaleKey = normalizeAdsText(row[indexes.sale]) === normalizeAdsText(account)
         ? marketplaceSaleKey : normalizeAdsText(row[indexes.sale]);
       const key = [normalizeAdsText(row[indexes.marketplace]), rowSaleKey,
@@ -1419,7 +1457,7 @@ async function handleAdsBaseUpload(request, response) {
       row[indexes.subcategory] = String(source.subcategory || '').trim();
       row[indexes.value] = Number(source.value) || 0;
       if (indexes.tag >= 0) row[indexes.tag] = '';
-      if (indexes.description >= 0) row[indexes.description] = known.description || '';
+      if (indexes.description >= 0) row[indexes.description] = known.description || String(source.title || source.description || '').trim();
       if (indexes.category2 >= 0) row[indexes.category2] = known.category2 || '';
       row[indexes.datatype] = 'Actual';
       if (indexes.recordDate >= 0) row[indexes.recordDate] = now;
@@ -1440,7 +1478,8 @@ async function handleAdsBaseUpload(request, response) {
         writeJsonWithRetry(adsUploadHistoryPath, history);
       }
     }
-    sendJson(response, 200, { added: addedRows.length, replaced, duplicatesRemoved: incomingRows.length - uniqueIncomingRows.length, platform, account, month });
+    const matchedByTitle = uniqueIncomingRows.filter((row) => row.matchedBy === 'title').length;
+    sendJson(response, 200, { added: addedRows.length, replaced, duplicatesRemoved: incomingRows.length - uniqueIncomingRows.length, matchedByTitle, platform, account, month });
     setImmediate(() => ensureIntelligentAnalysis(true).catch(() => {}));
   } catch (error) {
     console.error('Erro ao publicar base de ADS:', error);
@@ -1663,6 +1702,7 @@ function publicAdsUpload(item) {
   return {
     id: item.id, platform: item.platform, account: item.account, year: item.year, month: item.month,
     day: item.day, sequence: item.sequence, fileName: item.fileName, size: item.size,
+    unified: item.unified === true,
     uploadedAt: item.uploadedAt, treatedAt: item.treatedAt || null,
     treatedRows: Number(item.treatedRows) || 0, addedToBaseAt: item.addedToBaseAt || null,
     status: item.addedToBaseAt ? 'published' : (item.treatedAt ? 'treated' : 'raw')
@@ -1749,6 +1789,7 @@ async function handleAdsTreaterUploads(request, response) {
     const fileName = path.basename(String(payload.fileName || '').trim());
     const extension = path.extname(fileName).toLowerCase();
     const data = String(payload.dataBase64 || '');
+    const unified = payload.unified === true && normalizeAdsText(platform) === 'magalu';
     if (!platform || !account || !Number.isInteger(year) || year < 2020 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(day) || day < 1 || day > 31) {
       return sendJson(response, 400, { error: 'Informe plataforma, conta, ano, mês e dia válidos.' });
     }
@@ -1769,7 +1810,17 @@ async function handleAdsTreaterUploads(request, response) {
     const storedName = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}-${String(sequence).padStart(3, '0')}-${id}${extension}`;
     fs.writeFileSync(path.join(adsUploadFilesDir, storedName), bytes);
     const now = new Date().toISOString();
-    const item = { id, platform, account, salesChannelId, year, month, day, sequence, fileName, storedName, size: bytes.length, uploadedAt: now, treatedName: null, treatedAt: null, treatedRows: 0, addedToBaseAt: null };
+    if (payload.replaceMonth === true && unified) {
+      const replacedUploads = state.uploads.filter((entry) => adsChannelKey(entry.platform, entry.account) === adsChannelKey(platform, account) && Number(entry.year) === year && Number(entry.month) === month);
+      state.uploads = state.uploads.filter((entry) => !replacedUploads.includes(entry));
+      replacedUploads.forEach((entry) => {
+        const oldRaw = entry.storedName ? path.join(adsUploadFilesDir, path.basename(entry.storedName)) : '';
+        const oldTreated = entry.treatedName ? path.join(adsTreatedFilesDir, path.basename(entry.treatedName)) : '';
+        if (oldRaw && fs.existsSync(oldRaw)) fs.unlinkSync(oldRaw);
+        if (oldTreated && fs.existsSync(oldTreated)) fs.unlinkSync(oldTreated);
+      });
+    }
+    const item = { id, platform, account, salesChannelId, year, month, day, sequence, unified, fileName, storedName, size: bytes.length, uploadedAt: now, treatedName: null, treatedAt: null, treatedRows: 0, addedToBaseAt: null };
     state.uploads.push(item);
     state.uploads.sort((a, b) => b.year - a.year || b.month - a.month || b.day - a.day || b.sequence - a.sequence);
     state.updatedAt = now;

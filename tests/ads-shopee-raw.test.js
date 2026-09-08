@@ -32,9 +32,9 @@ assert.strictEqual(result.ads, 2);
 assert.strictEqual(result.duplicatesConsolidated, 1);
 assert.strictEqual(result.rows.length, 6);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(result.rows.slice(0, 3))), [
-  { marketplace: 'Shopee', marketplaceSale: 'Conta Shopee', sku: '', ad: '123', date: '', category: 'ADS F', subcategory: 'ADS F', value: 250 },
-  { marketplace: 'Shopee', marketplaceSale: 'Conta Shopee', sku: '', ad: '123', date: '', category: '03.Despesas Marketplace', subcategory: 'Publicidade', value: -25 },
-  { marketplace: 'Shopee', marketplaceSale: 'Conta Shopee', sku: '', ad: '123', date: '', category: 'Cliques', subcategory: 'Cliques', value: 15 }
+  { marketplace: 'Shopee', marketplaceSale: 'Conta Shopee', sku: '', ad: '123', title: 'Produto A', date: '', category: 'ADS F', subcategory: 'ADS F', value: 250 },
+  { marketplace: 'Shopee', marketplaceSale: 'Conta Shopee', sku: '', ad: '123', title: 'Produto A', date: '', category: '03.Despesas Marketplace', subcategory: 'Publicidade', value: -25 },
+  { marketplace: 'Shopee', marketplaceSale: 'Conta Shopee', sku: '', ad: '123', title: 'Produto A', date: '', category: 'Cliques', subcategory: 'Cliques', value: 15 }
 ]);
 assert.strictEqual(context.dayFromFileName('31.csv', 2026, 8), 31);
 assert.strictEqual(context.dayFromFileName('Dados+Gerais+de+Anúncios+Shopee-31_08_2026-31_08_2026.csv', 2026, 8), 31);

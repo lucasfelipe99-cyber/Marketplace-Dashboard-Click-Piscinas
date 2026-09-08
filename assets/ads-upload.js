@@ -13,7 +13,7 @@
     '<h2>Subir Base de ADS Actual</h2><p>A nova carga substitui integralmente o ADS anterior da conta e do mês selecionados, sem alterar as linhas de vendas.</p></div>' +
     '<span class="sales-upload-badge">ADS → Base de Dados</span></div>' +
     '<div class="sales-upload-grid"><div class="sales-upload-card">' +
-    '<label class="sales-upload-password">Plataforma<select id="adsUploadPlatform"><option value="Mercado Livre">Mercado Livre</option><option value="Shopee">Shopee</option><option value="TikTok">TikTok</option></select></label>' +
+    '<label class="sales-upload-password">Plataforma<select id="adsUploadPlatform"><option value="Mercado Livre">Mercado Livre</option><option value="Shopee">Shopee</option><option value="TikTok">TikTok</option><option value="Magalu">Magalu</option></select></label>' +
     '<label class="sales-upload-password">Conta / Marketplace venda<select id="adsUploadAccount"><option value="">Carregando contas cadastradas...</option></select></label>' +
     '<label class="sales-upload-password">Mês da Base de Dados<select id="adsUploadMonth"></select></label>' +
     '<label class="sales-upload-password">Senha administrativa<input id="adsUploadPassword" type="password" autocomplete="current-password" placeholder="Informe a senha"></label>' +
@@ -112,22 +112,22 @@
     if(!matrix||matrix.length<3)throw new Error('O relatório de ADS está vazio.');
     var headers=(matrix[1]||[]).map(function(value){return clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');});
     function column(needle){return headers.findIndex(function(header){return header.indexOf(needle)>=0;});}
-    var idx={from:column('desde'),to:column('ate'),ad:column('codigo do anuncio'),clicks:column('cliques'),revenue:column('receita'),investment:column('investimento')};
-    var missing=Object.keys(idx).filter(function(key){return idx[key]<0;});
+    var idx={from:column('desde'),to:column('ate'),ad:column('codigo do anuncio'),title:column('titulo'),clicks:column('cliques'),revenue:column('receita'),investment:column('investimento')};
+    var missing=Object.keys(idx).filter(function(key){return key!=='title'&&idx[key]<0;});
     if(missing.length)throw new Error('Colunas obrigatórias não encontradas no relatório: '+missing.join(', ')+'.');
     var aggregate=new Map(),sourceRows=0;
     matrix.slice(2).forEach(function(row){
       var ad=clean(row[idx.ad]),date=excelDate(row[idx.from]||row[idx.to]);
       if(!ad||!date)return;
       sourceRows+=1;
-      var key=[account,date,ad].join('\u001f'),current=aggregate.get(key)||{date:date,ad:ad,revenue:0,investment:0,clicks:0,sourceRows:0};
+      var key=[account,date,ad].join('\u001f'),current=aggregate.get(key)||{date:date,ad:ad,title:idx.title>=0?clean(row[idx.title]):'',revenue:0,investment:0,clicks:0,sourceRows:0};
       current.revenue+=numberValue(row[idx.revenue]);current.investment+=numberValue(row[idx.investment]);current.clicks+=numberValue(row[idx.clicks]);current.sourceRows+=1;aggregate.set(key,current);
     });
     if(!aggregate.size)throw new Error('Nenhum anúncio válido foi encontrado no relatório.');
     var rows=[];aggregate.forEach(function(item){
-      rows.push({marketplace:'Mercado Livre',marketplaceSale:account,sku:'',ad:item.ad,date:item.date,category:'ADS F',subcategory:'ADS F',value:item.revenue});
-      rows.push({marketplace:'Mercado Livre',marketplaceSale:account,sku:'',ad:item.ad,date:item.date,category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
-      rows.push({marketplace:'Mercado Livre',marketplaceSale:account,sku:'',ad:item.ad,date:item.date,category:'Cliques',subcategory:'Cliques',value:item.clicks});
+      rows.push({marketplace:'Mercado Livre',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:item.date,category:'ADS F',subcategory:'ADS F',value:item.revenue});
+      rows.push({marketplace:'Mercado Livre',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:item.date,category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
+      rows.push({marketplace:'Mercado Livre',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:item.date,category:'Cliques',subcategory:'Cliques',value:item.clicks});
     });
     var dates=Array.from(aggregate.values()).map(function(item){return item.date;}).sort();
     return{rows:rows,sourceRows:sourceRows,ads:aggregate.size,duplicatesConsolidated:sourceRows-aggregate.size,minDate:dates[0],maxDate:dates[dates.length-1]};
@@ -145,14 +145,14 @@
       var productId=clean(row[idx.ad]),name=clean(row[idx.name]),ad=productId&&productId!=='-'?productId:name;
       if(!ad)return;
       sourceRows+=1;
-      var key=[account,ad].join('\u001f'),current=aggregate.get(key)||{ad:ad,revenue:0,investment:0,clicks:0,sourceRows:0};
+      var key=[account,ad].join('\u001f'),current=aggregate.get(key)||{ad:ad,title:name,revenue:0,investment:0,clicks:0,sourceRows:0};
       current.revenue+=numberValue(row[idx.revenue]);current.investment+=numberValue(row[idx.investment]);current.clicks+=numberValue(row[idx.clicks]);current.sourceRows+=1;aggregate.set(key,current);
     });
     if(!aggregate.size)throw new Error('Nenhum anúncio válido foi encontrado no relatório da Shopee.');
     var rows=[];aggregate.forEach(function(item){
-      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'ADS F',subcategory:'ADS F',value:item.revenue});
-      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
-      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'Cliques',subcategory:'Cliques',value:item.clicks});
+      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:'',category:'ADS F',subcategory:'ADS F',value:item.revenue});
+      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:'',category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
+      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:'',category:'Cliques',subcategory:'Cliques',value:item.clicks});
     });
     return{rows:rows,sourceRows:sourceRows,ads:aggregate.size,duplicatesConsolidated:sourceRows-aggregate.size,minDate:'',maxDate:''};
   }
@@ -169,26 +169,51 @@
       var productId=clean(row[idx.ad]),name=clean(row[idx.name]),ad=productId&&productId!=='-'?productId:name;
       if(!ad)return;
       sourceRows+=1;
-      var key=[account,ad].join('\u001f'),current=aggregate.get(key)||{ad:ad,revenue:0,investment:0,sourceRows:0};
+      var key=[account,ad].join('\u001f'),current=aggregate.get(key)||{ad:ad,title:name,revenue:0,investment:0,sourceRows:0};
       current.revenue+=numberValue(row[idx.revenue]);current.investment+=numberValue(row[idx.investment]);current.sourceRows+=1;aggregate.set(key,current);
     });
     if(!aggregate.size)throw new Error('Nenhum anúncio válido foi encontrado no relatório do TikTok.');
     var rows=[];aggregate.forEach(function(item){
-      rows.push({marketplace:'TikTok',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'ADS F',subcategory:'ADS F',value:item.revenue});
-      rows.push({marketplace:'TikTok',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
+      rows.push({marketplace:'TikTok',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:'',category:'ADS F',subcategory:'ADS F',value:item.revenue});
+      rows.push({marketplace:'TikTok',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:'',category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
     });
     return{rows:rows,sourceRows:sourceRows,ads:aggregate.size,duplicatesConsolidated:sourceRows-aggregate.size,minDate:'',maxDate:''};
+  }
+  function parseMagaluAdsRaw(matrix,account){
+    if(!matrix||!matrix.length)throw new Error('O relatório unificado de ADS da Magalu está vazio.');
+    var normalized=matrix.map(function(row){return (row||[]).map(function(value){return clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');});});
+    var headerIndex=normalized.findIndex(function(row){return row.indexOf('nome')>=0&&row.indexOf('sku')>=0&&row.indexOf('cliques')>=0&&row.indexOf('vendas')>=0&&row.indexOf('investimento')>=0&&row.indexOf('data de inicio')>=0;});
+    if(headerIndex<0)throw new Error('As colunas Nome, SKU, Cliques, Vendas, Investimento e Data de Início não foram encontradas na base Magalu.');
+    var headers=normalized[headerIndex];
+    function column(name){return headers.indexOf(name);}
+    var idx={title:column('nome'),sku:column('sku'),clicks:column('cliques'),revenue:column('vendas'),investment:column('investimento'),date:column('data de inicio')};
+    var aggregate=new Map(),sourceRows=0;
+    matrix.slice(headerIndex+1).forEach(function(row){
+      var sku=clean(row[idx.sku]),title=clean(row[idx.title]),date=excelDate(row[idx.date]);
+      if((!sku&&!title)||!date)return;
+      sourceRows+=1;
+      var identity=sku||title,key=[account,date,identity].join('\u001f'),current=aggregate.get(key)||{sku:sku,ad:identity,title:title,date:date,revenue:0,investment:0,clicks:0,sourceRows:0};
+      current.revenue+=numberValue(row[idx.revenue]);current.investment+=numberValue(row[idx.investment]);current.clicks+=numberValue(row[idx.clicks]);current.sourceRows+=1;aggregate.set(key,current);
+    });
+    if(!aggregate.size)throw new Error('Nenhum anúncio válido foi encontrado na base Magalu.');
+    var rows=[];aggregate.forEach(function(item){
+      rows.push({marketplace:'Magalu',marketplaceSale:account,sku:item.sku,ad:item.ad,title:item.title,date:item.date,category:'ADS F',subcategory:'ADS F',value:item.revenue});
+      rows.push({marketplace:'Magalu',marketplaceSale:account,sku:item.sku,ad:item.ad,title:item.title,date:item.date,category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
+      rows.push({marketplace:'Magalu',marketplaceSale:account,sku:item.sku,ad:item.ad,title:item.title,date:item.date,category:'Cliques',subcategory:'Cliques',value:item.clicks});
+    });
+    var dates=Array.from(aggregate.values()).map(function(item){return item.date;}).sort();
+    return{rows:rows,sourceRows:sourceRows,ads:aggregate.size,duplicatesConsolidated:sourceRows-aggregate.size,minDate:dates[0],maxDate:dates[dates.length-1],unified:true};
   }
   function fileBase64(file) { return file.arrayBuffer().then(function(buffer){var bytes=new Uint8Array(buffer),chunk=0x8000,binary='';for(var i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));return btoa(binary);}); }
   function formatBytes(value){var n=Number(value)||0;return n<1024?n+' B':n<1048576?(n/1024).toLocaleString('pt-BR',{maximumFractionDigits:1})+' KB':(n/1048576).toLocaleString('pt-BR',{maximumFractionDigits:1})+' MB';}
   function dateTime(value){if(!value)return '—';return new Date(value).toLocaleString('pt-BR');}
   function uploadMarkup(item){
     var status=item.status==='published'?'<em>Publicado em '+dateTime(item.addedToBaseAt)+'</em>':item.status==='treated'?'<em>Tratado · '+Number(item.treatedRows).toLocaleString('pt-BR')+' linhas</em>':'<em class="pending">Aguardando tratamento</em>';
-    var action=item.status==='raw'?'<button type="button" disabled>Aguardando tratador</button>':'<button type="button" data-add-upload>'+(item.status==='published'?'Republicar':'Enviar para a base')+'</button>';
-    return '<article class="ads-account-upload" data-upload-id="'+item.id+'"><div class="ads-upload-number">Dia '+item.day+' · Subida '+item.sequence+'</div><small>'+escapeHtml(item.fileName)+' · '+formatBytes(item.size)+'</small>'+status+'<div><a href="/api/ads-treater/file?id='+encodeURIComponent(item.id)+'">Baixar</a>'+action+'<button type="button" class="danger" data-delete-upload>Excluir</button></div></article>';
+    var action='<button type="button" data-add-upload>'+(item.status==='raw'?'Tratar e enviar':item.status==='published'?'Republicar':'Enviar para a base')+'</button>';
+    return '<article class="ads-account-upload" data-upload-id="'+item.id+'"><div class="ads-upload-number">'+(item.unified?'Base mensal unificada':'Dia '+item.day+' · Subida '+item.sequence)+'</div><small>'+escapeHtml(item.fileName)+' · '+formatBytes(item.size)+'</small>'+status+'<div><a href="/api/ads-treater/file?id='+encodeURIComponent(item.id)+'">Baixar</a>'+action+'<button type="button" class="danger" data-delete-upload>Excluir</button></div></article>';
   }
   function treatedMonthInfo(rows,year,month){
-    var monthRows=rows.filter(function(item){return (item.status==='treated'||item.status==='published')&&Number(item.year)===Number(year)&&Number(item.month)===Number(month);}).sort(function(a,b){return Number(a.day)-Number(b.day)||Number(a.sequence)-Number(b.sequence);});
+    var monthRows=rows.filter(function(item){return (item.status==='raw'||item.status==='treated'||item.status==='published')&&Number(item.year)===Number(year)&&Number(item.month)===Number(month);}).sort(function(a,b){return Number(a.day)-Number(b.day)||Number(a.sequence)-Number(b.sequence);});
     if(!monthRows.length)return null;
     var days=Array.from(new Set(monthRows.map(function(item){return Number(item.day);}))).sort(function(a,b){return a-b;});
     return{year:Number(year),month:Number(month),rows:monthRows,days:days};
@@ -213,15 +238,34 @@
         return '<details class="ads-account-month'+(rows.length?' is-filled':'')+'"><summary><span><strong>'+name+' / '+year+'</strong><small>'+(rows.length?rows.length+' subida(s)':'Ainda não alimentado')+'</small></span><i aria-hidden="true">⌄</i></summary><div class="ads-account-month-content">'+(rows.length?rows.map(uploadMarkup).join(''):'<p>Nenhum arquivo cadastrado neste mês.</p>')+'</div></details>';
       }).join('');
       var treatedCount=accountRows.filter(function(item){return item.status==='treated'||item.status==='published';}).length,currentInfo=treatedMonthInfo(accountRows,defaultYear,now.getMonth()+1),currentLabel=monthNames[now.getMonth()]+'/'+defaultYear;
-      return '<article class="ads-account-card" data-ads-account="'+escapeHtml(account.account)+'" data-ads-platform="'+escapeHtml(account.marketplace)+'" data-sales-channel-id="'+escapeHtml(account.channelId||'')+'" data-card-year="'+defaultYear+'"><header><div><span>'+escapeHtml(account.marketplace)+'</span><h3>'+escapeHtml(account.account)+'</h3></div><div class="ads-account-controls"><label>Mês<select data-card-month>'+monthOptions+'</select></label><label class="ads-card-file">Selecionar relatórios brutos<input data-card-file type="file" multiple accept=".xlsx,.xlsm,.xls,.csv,.zip,.txt"></label><button type="button" data-card-save>Tratar e salvar arquivos</button><button type="button" data-republish-selected'+(currentInfo?'':' disabled')+'>Republicar mês selecionado ('+currentLabel+')</button><button type="button" class="ads-delete-channel" data-delete-channel>Excluir canal</button></div></header><div class="ads-account-meta">Vinculado ao Tratador de Vendas · O dia é identificado automaticamente pelo nome de cada arquivo (ex.: 1.xlsx = dia 1). · '+accountRows.length+' subida(s) no disco · '+treatedCount+' tratada(s) · <span data-selected-month-info>'+(currentInfo?'Dias disponíveis em '+currentLabel+': '+currentInfo.days.join(', '):'Nenhum dia tratado em '+currentLabel+'.')+'</span></div><div class="ads-account-operation" data-account-status></div><h4 class="ads-monthly-title">Controle mensal de arquivos</h4><div class="ads-account-month-grid">'+months+'</div></article>';
+      var unified=clean(account.marketplace).toLowerCase()==='magalu';
+      return '<article class="ads-account-card" data-ads-account="'+escapeHtml(account.account)+'" data-ads-platform="'+escapeHtml(account.marketplace)+'" data-sales-channel-id="'+escapeHtml(account.channelId||'')+'" data-card-year="'+defaultYear+'"><header><div><span>'+escapeHtml(account.marketplace)+'</span><h3>'+escapeHtml(account.account)+'</h3></div><div class="ads-account-controls"><label>Mês<select data-card-month>'+monthOptions+'</select></label><label class="ads-card-file">'+(unified?'Selecionar base mensal unificada':'Selecionar relatórios brutos')+'<input data-card-file type="file"'+(unified?'':' multiple')+' accept=".xlsx,.xlsm,.xls,.csv,.zip,.txt"></label><button type="button" data-card-save>'+(unified?'Substituir e tratar base mensal':'Tratar e salvar arquivos')+'</button><button type="button" data-republish-selected'+(currentInfo?'':' disabled')+'>Republicar mês selecionado ('+currentLabel+')</button><button type="button" class="ads-delete-channel" data-delete-channel>Excluir canal</button></div></header><div class="ads-account-meta">Vinculado ao Tratador de Vendas · '+(unified?'A nova base unificada substitui integralmente a carga Magalu anterior deste mês.':'O dia é identificado automaticamente pelo nome de cada arquivo (ex.: 1.xlsx = dia 1).')+' · '+accountRows.length+' subida(s) no disco · '+treatedCount+' tratada(s) · <span data-selected-month-info>'+(currentInfo?'Dias disponíveis em '+currentLabel+': '+currentInfo.days.join(', '):'Nenhum dia tratado em '+currentLabel+'.')+'</span></div><div class="ads-account-operation" data-account-status></div><h4 class="ads-monthly-title">Controle mensal de arquivos</h4><div class="ads-account-month-grid">'+months+'</div></article>';
     }).join('');
   }
   async function loadHistory(){try{var response=await fetch('/api/ads-treater/uploads',{cache:'no-store'}),result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível carregar o histórico.');uploadHistory=result.uploads||[];excludedChannels=result.excludedChannels||[];refreshAccountOptions();renderHistory();}catch(error){historyBox.innerHTML='<div class="ads-treater-empty">'+escapeHtml(error.message)+'</div>';historySummary.textContent='Falha ao carregar';}}
+  async function treatStoredRawUpload(item,password){
+    var rawResponse=await fetch('/api/ads-treater/file?id='+encodeURIComponent(item.id),{cache:'no-store'});
+    if(!rawResponse.ok)throw new Error('O arquivo bruto da subida '+item.sequence+' do dia '+item.day+' não está disponível para tratamento.');
+    var rawFile=new File([await rawResponse.blob()],item.fileName||('ads-'+item.day+'.xlsx'));
+    var platform=clean(item.platform).toLowerCase(),transformed;
+    if(platform==='mercado livre')transformed=parseMercadoLivreRaw(await readRawWorkbook(rawFile),item.account);
+    else if(platform==='shopee')transformed=parseShopeeRaw(await readWorkbook(rawFile),item.account);
+    else if(platform==='tiktok')transformed=parseTikTokAdsRaw(await readWorkbook(rawFile),item.account);
+    else if(platform==='magalu')transformed=parseMagaluAdsRaw(await readWorkbook(rawFile),item.account);
+    else throw new Error('Ainda não existe tratamento automático de ADS para '+item.platform+'.');
+    var selectedDate=[item.year,String(item.month).padStart(2,'0'),String(item.day).padStart(2,'0')].join('-');
+    transformed.rows.forEach(function(row){row.date=selectedDate;});
+    var saveResponse=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'save-treated',id:item.id,rows:transformed.rows})}),saveResult=await saveResponse.json();
+    if(!saveResponse.ok)throw new Error(saveResult.error||'Não foi possível salvar o tratamento da subida '+item.sequence+'.');
+    uploadHistory=saveResult.uploads||uploadHistory;
+    return uploadHistory.find(function(entry){return entry.id===item.id;})||Object.assign({},item,{status:'treated',treatedRows:transformed.rows.length});
+  }
   async function publishTreatedUpload(item,password){
+    if(item.status==='raw')item=await treatStoredRawUpload(item,password);
     var treatedResponse=await fetch('/api/ads-treater/treated?id='+encodeURIComponent(item.id),{cache:'no-store'}),treated=await treatedResponse.json();
     if(!treatedResponse.ok)throw new Error(treated.error||'O resultado tratado da subida '+item.sequence+' não está disponível.');
     if(!treated.rows||!treated.rows.length)throw new Error('A subida '+item.sequence+' não gerou linhas para a Base de Dados.');
-    var response=await fetch('/api/ads-base',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({month:item.month,platform:item.platform,account:item.account,rows:treated.rows,append:true,uploadId:item.id})});
+    var response=await fetch('/api/ads-base',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({month:item.month,platform:item.platform,account:item.account,rows:treated.rows,append:true,uploadId:item.id,replaceChannelMonth:item.unified===true})});
     var result=await response.json();
     if(!response.ok)throw new Error(result.error||'Não foi possível publicar a subida '+item.sequence+'.');
     return result;
@@ -315,22 +359,24 @@
       try{
         if(!files.length)throw new Error('Selecione um ou mais arquivos diários de ADS desta conta.');
         if(!password)throw new Error('Informe a senha administrativa no painel abaixo.');
-        var prepared=files.map(function(file){return{file:file,day:dayFromFileName(file.name,year,month)};}).sort(function(a,b){return a.day-b.day||a.file.name.localeCompare(b.file.name);});
+        var unified=clean(platform).toLowerCase()==='magalu';
+        if(unified&&files.length!==1)throw new Error('Selecione somente uma base mensal unificada da Magalu.');
+        var prepared=files.map(function(file){return{file:file,day:unified?1:dayFromFileName(file.name,year,month),unified:unified};}).sort(function(a,b){return a.day-b.day||a.file.name.localeCompare(b.file.name);});
         button.disabled=true;
         var completed=0,totalRows=0,totalAds=0;
         for(var fileIndex=0;fileIndex<prepared.length;fileIndex+=1){
           var current=prepared[fileIndex],file=current.file,day=current.day,transformed=null;
           button.textContent='Tratando '+(fileIndex+1)+' de '+prepared.length+'...';
           accountStatus.textContent='Dia '+day+' · '+file.name;
-          if(platform==='Mercado Livre'||platform==='Shopee'||platform==='TikTok'){
+          if(platform==='Mercado Livre'||platform==='Shopee'||platform==='TikTok'||platform==='Magalu'){
             if(platform==='Mercado Livre')transformed=parseMercadoLivreRaw(await readRawWorkbook(file),account);
             else if(platform==='Shopee')transformed=parseShopeeRaw(await readWorkbook(file),account);
-            else transformed=parseTikTokAdsRaw(await readWorkbook(file),account);
-            var selectedDate=[year,String(month).padStart(2,'0'),String(day).padStart(2,'0')].join('-');
-            transformed.rows.forEach(function(row){row.date=selectedDate;});
-            transformed.minDate=selectedDate;transformed.maxDate=selectedDate;
+            else if(platform==='TikTok')transformed=parseTikTokAdsRaw(await readWorkbook(file),account);
+            else transformed=parseMagaluAdsRaw(await readWorkbook(file),account);
+            if(!unified){var selectedDate=[year,String(month).padStart(2,'0'),String(day).padStart(2,'0')].join('-');transformed.rows.forEach(function(row){row.date=selectedDate;});transformed.minDate=selectedDate;transformed.maxDate=selectedDate;}
+            if(Number(transformed.minDate.slice(0,4))!==year||Number(transformed.minDate.slice(5,7))!==month||Number(transformed.maxDate.slice(0,4))!==year||Number(transformed.maxDate.slice(5,7))!==month)throw new Error('A base Magalu possui datas fora do mês e ano selecionados.');
           }
-          var response=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'add',platform:platform,account:account,salesChannelId:salesChannelId,year:year,month:month,day:day,fileName:file.name,dataBase64:await fileBase64(file)})}),result=await response.json();
+          var response=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'add',platform:platform,account:account,salesChannelId:salesChannelId,year:year,month:month,day:day,fileName:file.name,dataBase64:await fileBase64(file),unified:unified,replaceMonth:unified})}),result=await response.json();
           if(!response.ok)throw new Error(result.error||'Não foi possível salvar "'+file.name+'".');
           if(transformed){
             var treatedResponse=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'save-treated',id:result.upload.id,rows:transformed.rows})}),treatedResult=await treatedResponse.json();
@@ -339,18 +385,18 @@
           }else uploadHistory=result.uploads||[];
           completed+=1;
         }
-        var successMessage=completed+' arquivo(s) salvo(s) com sucesso. '+totalAds.toLocaleString('pt-BR')+' anúncios e '+totalRows.toLocaleString('pt-BR')+' linhas tratadas. Dias identificados pelo nome dos arquivos.';
+        var successMessage=completed+' arquivo(s) salvo(s) com sucesso. '+totalAds.toLocaleString('pt-BR')+' anúncios e '+totalRows.toLocaleString('pt-BR')+' linhas tratadas. '+(unified?'A base mensal Magalu anterior foi substituída.':'Dias identificados pelo nome dos arquivos.');
         accountStatus.innerHTML='<strong>'+successMessage+'</strong>';
         accountCard.querySelector('[data-card-file]').value='';
         renderHistory();
         alert(successMessage);
       }catch(error){accountStatus.textContent=error.message;alert(error.message);}
-      finally{button.disabled=false;button.textContent='Tratar e salvar arquivos';}
+      finally{button.disabled=false;button.textContent=clean(platform).toLowerCase()==='magalu'?'Substituir e tratar base mensal':'Tratar e salvar arquivos';}
       return;
     }
     var card=event.target.closest('[data-upload-id]');if(!card)return;var id=card.getAttribute('data-upload-id'),item=uploadHistory.find(function(entry){return entry.id===id;});if(!item)return;
     if(event.target.matches('[data-delete-upload]')){if(!confirm('Excluir a subida '+item.sequence+' do dia '+item.day+'? O arquivo será removido do disco.'))return;var password=prompt('Informe a senha administrativa para excluir:');if(!password)return;try{var response=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'delete',id:id})}),result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível excluir.');uploadHistory=result.uploads||[];renderHistory();}catch(error){alert(error.message);}return;}
-    if(event.target.closest('[data-add-upload]')){try{var password=document.getElementById('adsUploadPassword').value||prompt('Informe a senha administrativa para republicar esta base de ADS:');if(!password)return;statusBox.textContent='Carregando o resultado tratado da subida '+item.sequence+'...';var result=await publishTreatedUpload(item,password);statusBox.innerHTML='<strong>Arquivo tratado publicado</strong><br>'+result.added.toLocaleString('pt-BR')+' linhas adicionadas à Base de Dados e disponibilizadas aos painéis.';await loadHistory();}catch(error){statusBox.textContent=error.message;alert(error.message);}return;}
+    if(event.target.closest('[data-add-upload]')){try{var password=document.getElementById('adsUploadPassword').value||prompt('Informe a senha administrativa para tratar e publicar esta base de ADS:');if(!password)return;statusBox.textContent=(item.status==='raw'?'Tratando':'Carregando')+' a subida '+item.sequence+'...';var result=await publishTreatedUpload(item,password);statusBox.innerHTML='<strong>Arquivo tratado e publicado</strong><br>'+result.added.toLocaleString('pt-BR')+' linhas adicionadas à Base de Dados e disponibilizadas aos painéis.';await loadHistory();}catch(error){statusBox.textContent=error.message;alert(error.message);}return;}
   });
   historyBox.addEventListener('change',function(event){if(event.target.matches('[data-card-month]'))updateSelectedMonth(event.target.closest('.ads-account-card'));});
   document.getElementById('adsReloadTreaters').onclick=async function(){
@@ -394,26 +440,13 @@
   window.adsBaseIntegration={
     republishAll:async function(password,onProgress){
       await loadHistory();
-      var rows=uploadHistory.filter(function(item){return item.status==='treated'||item.status==='published';})
+      var rows=uploadHistory.filter(function(item){return item.status==='raw'||item.status==='treated'||item.status==='published';})
         .sort(function(a,b){return Number(a.year)-Number(b.year)||Number(a.month)-Number(b.month)||Number(a.day)-Number(b.day)||Number(a.sequence)-Number(b.sequence);});
       var total=0,retreated=0;
       for(var index=0;index<rows.length;index+=1){
         var item=rows[index];
         if(typeof onProgress==='function')onProgress('Retratando ADS · '+item.platform+' - '+item.account+' · '+monthNames[Number(item.month)-1]+'/'+item.year+' · dia '+item.day+' ('+(index+1)+' de '+rows.length+')...');
-        if(item.platform==='Mercado Livre'||item.platform==='Shopee'||item.platform==='TikTok'){
-          var rawResponse=await fetch('/api/ads-treater/file?id='+encodeURIComponent(item.id),{cache:'no-store'});
-          if(!rawResponse.ok)throw new Error('O arquivo bruto da subida '+item.sequence+' do dia '+item.day+' não está disponível para retratamento.');
-          var rawFile=new File([await rawResponse.blob()],item.fileName||('ads-'+item.day+'.xlsx'));
-          var transformed;
-          if(item.platform==='Mercado Livre')transformed=parseMercadoLivreRaw(await readRawWorkbook(rawFile),item.account);
-          else if(item.platform==='Shopee')transformed=parseShopeeRaw(await readWorkbook(rawFile),item.account);
-          else transformed=parseTikTokAdsRaw(await readWorkbook(rawFile),item.account);
-          var selectedDate=[item.year,String(item.month).padStart(2,'0'),String(item.day).padStart(2,'0')].join('-');
-          transformed.rows.forEach(function(row){row.date=selectedDate;});
-          var saveResponse=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'save-treated',id:item.id,rows:transformed.rows})}),saveResult=await saveResponse.json();
-          if(!saveResponse.ok)throw new Error(saveResult.error||'Não foi possível salvar o novo tratamento de ADS.');
-          retreated+=1;
-        }
+        item=await treatStoredRawUpload(item,password);retreated+=1;
         if(typeof onProgress==='function')onProgress('Republicando ADS · '+item.platform+' - '+item.account+' · dia '+item.day+' ('+(index+1)+' de '+rows.length+')...');
         var result=await publishTreatedUpload(item,password);total+=Number(result.added)||0;
       }

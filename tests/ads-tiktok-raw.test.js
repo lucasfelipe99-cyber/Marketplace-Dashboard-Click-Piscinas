@@ -27,8 +27,8 @@ assert.strictEqual(result.ads, 2);
 assert.strictEqual(result.duplicatesConsolidated, 1);
 assert.strictEqual(result.rows.length, 4);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(result.rows.slice(0, 2))), [
-  { marketplace: 'TikTok', marketplaceSale: 'Click Piscinas', sku: '', ad: '1736053751479174361', date: '', category: 'ADS F', subcategory: 'ADS F', value: 30 },
-  { marketplace: 'TikTok', marketplaceSale: 'Click Piscinas', sku: '', ad: '1736053751479174361', date: '', category: '03.Despesas Marketplace', subcategory: 'Publicidade', value: -1 }
+  { marketplace: 'TikTok', marketplaceSale: 'Click Piscinas', sku: '', ad: '1736053751479174361', title: 'Produto A', date: '', category: 'ADS F', subcategory: 'ADS F', value: 30 },
+  { marketplace: 'TikTok', marketplaceSale: 'Click Piscinas', sku: '', ad: '1736053751479174361', title: 'Produto A', date: '', category: '03.Despesas Marketplace', subcategory: 'Publicidade', value: -1 }
 ]);
 assert.ok(!result.rows.some((row) => row.category === 'Cliques'));
 
