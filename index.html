@@ -9199,7 +9199,7 @@
 
       return getGlobalDateFilteredRows(dashboardState.dataRows).filter(function (row) {
         return (!filters.marketplace || getCellByIndex(row, columns.marketplaceIndex) === filters.marketplace)
-          && (!filters.marketplaceSale || getCellByIndex(row, columns.marketplaceSaleIndex) === filters.marketplaceSale)
+          && (!filters.marketplaceSale || normalizeMarketplaceSaleCompany(getCellByIndex(row, columns.marketplaceSaleIndex)) === normalizeMarketplaceSaleCompany(filters.marketplaceSale))
           && (!filters.sku || getCellByIndex(row, columns.skuIndex) === filters.sku)
           && (!filters.category || getCellByIndex(row, columns.categoryIndex) === filters.category);
       });
@@ -9264,7 +9264,8 @@
       }
 
       dashboardState.dataRows.forEach(function (row) {
-        const value = String(row[index] || '');
+        const rawValue = String(row[index] || '');
+        const value = normalizeText(column) === 'marketplace venda' ? getMarketplaceSaleCompanyName(rawValue) : rawValue;
 
         if (!seen.has(value) && normalizeText(value) !== 'x') {
           seen.add(value);
@@ -9569,7 +9570,8 @@
 
         dataset.dataRows.forEach(function (row) {
           const marketplace = getSalesHistoryCell(row, dataset.columns.marketplace) || '(vazio)';
-          const marketplaceSale = getSalesHistoryCell(row, dataset.columns.marketplaceSale) || '(vazio)';
+          const marketplaceSaleRaw = getSalesHistoryCell(row, dataset.columns.marketplaceSale) || '(vazio)';
+          const marketplaceSale = getMarketplaceSaleCompanyName(marketplaceSaleRaw) || '(vazio)';
           const productCategory = getSalesHistoryCell(row, dataset.columns.productCategory) || '(vazio)';
           const sku = getSalesHistoryCell(row, dataset.columns.sku) || '(vazio)';
           const ad = getSalesHistoryCell(row, dataset.columns.ad) || '(vazio)';
@@ -11894,7 +11896,10 @@
       const optionsFragment = document.createDocumentFragment();
       values.forEach(function (value) {
         const option = document.createElement('button');
-        const isSelected = selectedValues.length === 0 || selectedValues.includes(value);
+        const normalizedValue = normalizeSlicerValue(column, value);
+        const isSelected = selectedValues.length === 0 || selectedValues.some(function (selectedValue) {
+          return normalizeSlicerValue(column, selectedValue) === normalizedValue;
+        });
 
         option.className = 'slicer-option' + getMarketplaceColorClass(column, value) + (isSelected ? '' : ' off');
         option.type = 'button';
@@ -11987,8 +11992,20 @@
 
     function getUniqueValuesForSlicer(column, columnIndex) {
       const rows = getRowsForSlicerOptions(column);
-      const values = getUniqueValuesFromRows(rows, columnIndex);
+      const rawValues = getUniqueValuesFromRows(rows, columnIndex);
+      const values = [];
+      const seen = new Set();
       const selectedValues = dashboardState.filters[column] || [];
+
+      rawValues.forEach(function (rawValue) {
+        const value = isMarketplaceVendaColumn(column) ? getMarketplaceSaleCompanyName(rawValue) : rawValue;
+        const key = normalizeSlicerValue(column, value);
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          values.push(value);
+        }
+      });
 
       selectedValues.forEach(function (selectedValue) {
         const normalizedSelected = normalizeSlicerValue(column, selectedValue);
@@ -12051,6 +12068,9 @@
 
     function normalizeSlicerValue(column, value) {
       const text = String(value || '').trim();
+      if (isMarketplaceVendaColumn(column)) {
+        return normalizeMarketplaceSaleCompany(text);
+      }
       return isAdSlicerColumn(column) ? normalizeText(text) : text;
     }
 
@@ -12084,6 +12104,29 @@
     */
     function isMarketplaceVendaColumn(column) {
       return normalizeText(column) === 'marketplace venda';
+    }
+
+    /*
+      A base conserva "Plataforma - Empresa" para identificar a origem. Nos filtros,
+      porém, Marketplace venda representa a empresa/CNPJ e deve aparecer sem o prefixo.
+    */
+    function getMarketplaceSaleCompanyName(value) {
+      const text = String(value || '').trim();
+      const marketplaces = ['Mercado Livre', 'TikTok', 'Shopee', 'Magalu', 'Amazon', 'Shein'];
+      const normalizedText = normalizeText(text);
+
+      for (const marketplace of marketplaces) {
+        const prefix = normalizeText(marketplace) + ' - ';
+        if (normalizedText.startsWith(prefix)) {
+          return text.slice(marketplace.length + 3).trim() || text;
+        }
+      }
+
+      return text;
+    }
+
+    function normalizeMarketplaceSaleCompany(value) {
+      return normalizeText(getMarketplaceSaleCompanyName(value));
     }
 
     /*
@@ -12137,13 +12180,16 @@
     }
 
     function toggleFilterValue(column, value) {
-      const currentValues = dashboardState.filters[column] || [];
+      const filterValue = isMarketplaceVendaColumn(column) ? getMarketplaceSaleCompanyName(value) : value;
+      const currentValues = (dashboardState.filters[column] || []).map(function (currentValue) {
+        return isMarketplaceVendaColumn(column) ? getMarketplaceSaleCompanyName(currentValue) : currentValue;
+      });
 
       if (isDateSlicerColumn(column)) {
-        if (currentValues.length === 1 && currentValues[0] === value) {
+        if (currentValues.length === 1 && currentValues[0] === filterValue) {
           delete dashboardState.filters[column];
         } else {
-          dashboardState.filters[column] = [value];
+          dashboardState.filters[column] = [filterValue];
         }
 
         resetDashboardPages();
@@ -12152,9 +12198,9 @@
       }
 
       if (!currentValues.length) {
-        dashboardState.filters[column] = [value];
-      } else if (currentValues.includes(value)) {
-        const nextValues = currentValues.filter(item => item !== value);
+        dashboardState.filters[column] = [filterValue];
+      } else if (currentValues.includes(filterValue)) {
+        const nextValues = currentValues.filter(item => item !== filterValue);
 
         if (nextValues.length) {
           dashboardState.filters[column] = nextValues;
@@ -12162,7 +12208,7 @@
           delete dashboardState.filters[column];
         }
       } else {
-        currentValues.push(value);
+        currentValues.push(filterValue);
         dashboardState.filters[column] = currentValues;
       }
 
