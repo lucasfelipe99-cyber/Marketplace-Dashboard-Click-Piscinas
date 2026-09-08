@@ -239,6 +239,45 @@
       font-weight: 700;
     }
 
+    .product-detail-trigger {
+      color: var(--accent-strong);
+      font-weight: 800;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      text-underline-offset: 3px;
+      cursor: pointer;
+    }
+
+    .product-detail-trigger:focus-visible {
+      outline: 2px solid var(--accent-strong);
+      outline-offset: -3px;
+    }
+
+    .product-detail-modal {
+      width: min(460px, 100%);
+    }
+
+    .product-detail-modal dl {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 10px 14px;
+      margin: 0;
+    }
+
+    .product-detail-modal dt {
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .product-detail-modal dd {
+      margin: 0;
+      color: var(--text);
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
     /*
       Painel superior com upload.
     */
@@ -12856,6 +12895,7 @@
         'Tarifa de Frete',
         'Afiliados',
         'Total Cost',
+        'CMV',
         '04.Materia Prima',
         '04.Matéria-Prima',
         '05.Mão de Obra',
@@ -14168,6 +14208,173 @@
       intelligentContainer.innerHTML = '<div class="empty-table">Carregue uma base para gerar a Análise Inteligente com IA.</div>';
       salesHistoryContainer.innerHTML = '<div class="empty-table">Carregue bases mensais para visualizar o Histórico de Venda.</div>';
     }
+
+    let productDetailsDatabase = null;
+    let productDetailsRequest = null;
+
+    function isProductDetailHeader(value) {
+      const header = normalizeText(value);
+      return header === 'sku' || header === 'id anuncio' || header === 'id do anuncio' || header === 'anuncio';
+    }
+
+    function getTableHeaders(table) {
+      const headerRow = table && table.tHead && table.tHead.rows.length
+        ? table.tHead.rows[table.tHead.rows.length - 1]
+        : table && table.querySelector('tr');
+      return headerRow ? Array.from(headerRow.cells).map(function (cell) { return cell.textContent.trim(); }) : [];
+    }
+
+    function markProductDetailCells(root) {
+      (root || document).querySelectorAll('table').forEach(function (table) {
+        const headers = getTableHeaders(table);
+        const clickableIndexes = headers.map(function (header, index) {
+          return isProductDetailHeader(header) ? index : -1;
+        }).filter(function (index) { return index >= 0; });
+        if (!clickableIndexes.length || !table.tBodies.length) return;
+        Array.from(table.tBodies).forEach(function (tbody) {
+          Array.from(tbody.rows).forEach(function (row) {
+            clickableIndexes.forEach(function (index) {
+              const cell = row.cells[index];
+              if (!cell || !cell.textContent.trim() || normalizeText(cell.textContent) === 'vazio') return;
+              cell.classList.add('product-detail-trigger');
+              cell.tabIndex = 0;
+              cell.setAttribute('role', 'button');
+              cell.title = 'Clique para ver o produto e o custo unitário';
+            });
+          });
+        });
+      });
+    }
+
+    function getProductDetailRowValue(row, headers, aliases) {
+      const aliasSet = new Set(aliases.map(normalizeText));
+      const index = headers.findIndex(function (header) { return aliasSet.has(normalizeText(header)); });
+      return index >= 0 && row.cells[index] ? row.cells[index].textContent.trim() : '';
+    }
+
+    function findProductInCurrentBase(sku, ad) {
+      const headers = dashboardState.headers || [];
+      const skuIndex = headers.indexOf(findHeader(headers, ['SKU']));
+      const adIndex = headers.indexOf(findHeader(headers, ['Id anúncio', 'Id anuncio', 'ID do anuncio', 'Anúncio']));
+      const descriptionIndex = headers.indexOf(findHeader(headers, ['Descrição', 'Titulo do anúncio', 'Título do anúncio', 'Nome do produto', 'Produto']));
+      const normalizedSku = normalizeText(sku);
+      const normalizedAd = normalizeText(ad);
+      const row = (dashboardState.dataRows || []).find(function (item) {
+        return (normalizedSku && skuIndex >= 0 && normalizeText(item[skuIndex]) === normalizedSku)
+          || (normalizedAd && adIndex >= 0 && normalizeText(item[adIndex]) === normalizedAd);
+      });
+      return {
+        sku: sku || (row && skuIndex >= 0 ? String(row[skuIndex] || '').trim() : ''),
+        ad: ad || (row && adIndex >= 0 ? String(row[adIndex] || '').trim() : ''),
+        description: row && descriptionIndex >= 0 ? String(row[descriptionIndex] || '').trim() : ''
+      };
+    }
+
+    async function loadProductDetailsDatabase() {
+      if (productDetailsDatabase) return productDetailsDatabase;
+      if (!productDetailsRequest) {
+        productDetailsRequest = fetch('/api/pricing-database', { cache: 'no-store' }).then(function (response) {
+          if (!response.ok) throw new Error('Não foi possível consultar o cadastro de custos.');
+          return response.json();
+        }).then(function (database) {
+          productDetailsDatabase = database || { costs: {}, pendingCosts: [] };
+          return productDetailsDatabase;
+        }).finally(function () {
+          productDetailsRequest = null;
+        });
+      }
+      return productDetailsRequest;
+    }
+
+    function findCostRecord(database, keys) {
+      const costs = database && database.costs || {};
+      const normalizedKeys = keys.filter(Boolean).map(normalizeText);
+      const exactKey = keys.find(function (key) { return Object.prototype.hasOwnProperty.call(costs, key); });
+      if (exactKey) return costs[exactKey];
+      const storedKey = Object.keys(costs).find(function (key) { return normalizedKeys.includes(normalizeText(key)); });
+      if (storedKey) return costs[storedKey];
+      return (database.pendingCosts || []).find(function (item) {
+        return normalizedKeys.includes(normalizeText(item.sku));
+      }) || null;
+    }
+
+    function ensureProductDetailModal() {
+      let backdrop = document.getElementById('productDetailBackdrop');
+      if (backdrop) return backdrop;
+      backdrop = document.createElement('div');
+      backdrop.id = 'productDetailBackdrop';
+      backdrop.className = 'modal-backdrop';
+      backdrop.setAttribute('aria-hidden', 'true');
+      backdrop.innerHTML = '<section class="admin-modal product-detail-modal" role="dialog" aria-modal="true" aria-labelledby="productDetailTitle"><h2 id="productDetailTitle">Detalhes do produto</h2><div id="productDetailContent"></div><div class="modal-actions"><button class="modal-button secondary" type="button" data-product-detail-close>Fechar</button></div></section>';
+      backdrop.addEventListener('click', function (event) {
+        if (event.target === backdrop || event.target.closest('[data-product-detail-close]')) closeProductDetailModal();
+      });
+      document.body.appendChild(backdrop);
+      return backdrop;
+    }
+
+    function closeProductDetailModal() {
+      const backdrop = document.getElementById('productDetailBackdrop');
+      if (!backdrop) return;
+      backdrop.classList.remove('active');
+      backdrop.setAttribute('aria-hidden', 'true');
+    }
+
+    async function openProductDetailFromCell(cell) {
+      const row = cell.closest('tr');
+      const table = cell.closest('table');
+      const headers = getTableHeaders(table);
+      const clickedHeader = headers[cell.cellIndex] || '';
+      let sku = getProductDetailRowValue(row, headers, ['SKU']);
+      let ad = getProductDetailRowValue(row, headers, ['Id anúncio', 'Id anuncio', 'ID do anuncio', 'Anúncio']);
+      if (normalizeText(clickedHeader) === 'sku') sku = cell.textContent.trim();
+      else ad = cell.textContent.trim();
+      const baseProduct = findProductInCurrentBase(sku, ad);
+      sku = baseProduct.sku;
+      ad = baseProduct.ad;
+      const backdrop = ensureProductDetailModal();
+      const content = backdrop.querySelector('#productDetailContent');
+      backdrop.classList.add('active');
+      backdrop.setAttribute('aria-hidden', 'false');
+      content.innerHTML = '<p class="modal-message">Consultando cadastro de custos...</p>';
+      try {
+        const database = await loadProductDetailsDatabase();
+        const record = findCostRecord(database, [sku, ad]);
+        const description = record && record.description || baseProduct.description || 'Produto sem descrição cadastrada';
+        const cost = record && record.productCost !== null && record.productCost !== undefined
+          ? formatCurrency(record.productCost)
+          : 'Não cadastrado';
+        content.innerHTML = '<dl>'
+          + '<dt>Produto</dt><dd>' + escapeHtml(description) + '</dd>'
+          + '<dt>Custo unitário</dt><dd>' + escapeHtml(cost) + '</dd>'
+          + (sku ? '<dt>SKU</dt><dd>' + escapeHtml(sku) + '</dd>' : '')
+          + (ad ? '<dt>ID do anúncio</dt><dd>' + escapeHtml(ad) + '</dd>' : '')
+          + '</dl>';
+      } catch (error) {
+        content.innerHTML = '<p class="modal-message error">' + escapeHtml(error.message || 'Não foi possível carregar os detalhes.') + '</p>';
+      }
+      const closeButton = backdrop.querySelector('[data-product-detail-close]');
+      if (closeButton) closeButton.focus();
+    }
+
+    document.addEventListener('click', function (event) {
+      const cell = event.target.closest('td.product-detail-trigger');
+      if (cell) openProductDetailFromCell(cell);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeProductDetailModal();
+      if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('td.product-detail-trigger')) {
+        event.preventDefault();
+        openProductDetailFromCell(event.target);
+      }
+    });
+    let productDetailMarkFrame = 0;
+    const productDetailObserver = new MutationObserver(function () {
+      cancelAnimationFrame(productDetailMarkFrame);
+      productDetailMarkFrame = requestAnimationFrame(function () { markProductDetailCells(document); });
+    });
+    productDetailObserver.observe(document.body, { childList: true, subtree: true });
+    markProductDetailCells(document);
 
     /*
       Remove o visual de erro antes de tentar ler outro arquivo.
