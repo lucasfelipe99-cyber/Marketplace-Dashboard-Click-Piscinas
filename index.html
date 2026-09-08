@@ -4830,10 +4830,18 @@
 
     <!-- Aba com a tabela completa criada pelo JavaScript. -->
     <section class="tab-panel active" id="dataPanel">
+      <style>
+        .database-rebuild-bar{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:10px 18px;align-items:center}.database-rebuild-bar>div:first-child{display:grid;gap:4px}.database-rebuild-bar>small{grid-column:1/-1}.database-action-menu{position:relative}.database-action-menu>summary{list-style:none;min-width:230px;padding:12px 18px;border:1px solid #4f8cff;border-radius:10px;background:#3478f6;color:#fff;font-weight:800;text-align:center;cursor:pointer}.database-action-menu>summary::-webkit-details-marker{display:none}.database-action-menu[open]>summary{border-radius:10px 10px 0 0}.database-action-options{position:absolute;z-index:50;right:0;width:min(430px,90vw);display:grid;gap:9px;padding:13px;border:1px solid var(--border-strong);border-radius:12px 0 12px 12px;background:var(--surface-strong);box-shadow:0 18px 42px rgba(0,0,0,.38)}.database-action-options button,.database-action-options select{width:100%;min-height:42px}.database-action-options label{display:grid;gap:5px;color:var(--text-soft);font-size:12px;font-weight:800}.database-action-options .danger{border-color:#ef476f;background:rgba(239,71,111,.12);color:#ff6b89}@media(max-width:760px){.database-rebuild-bar{grid-template-columns:1fr}.database-action-menu>summary{width:100%}.database-action-options{position:relative;width:auto}.database-rebuild-bar>small{grid-column:auto}}
+      </style>
       <section class="database-rebuild-bar" aria-label="Reconstrução completa da base de dados">
-        <div><strong>Reconstrução completa</strong><span>Limpa a base consolidada, retrata todas as contas de Vendas e republica todos os arquivos tratados de ADS.</span></div>
-        <button id="rebuildAllDatabase" type="button">Limpar base e retratar tudo</button>
-        <small id="rebuildAllDatabaseStatus" aria-live="polite">Os arquivos tratados permanecem salvos em /var/data e um backup é criado antes da limpeza.</small>
+        <div><strong>Gerenciar Base de Dados</strong><span>Reconstrua a base atual, recomece o sistema do zero ou restaure um snapshot completo por data.</span></div>
+        <details class="database-action-menu" id="databaseActionMenu"><summary>Opções da Base de Dados ▾</summary><div class="database-action-options">
+          <button id="rebuildAllDatabase" type="button">Reconstruir com os tratamentos atuais</button>
+          <button id="resetAllSystemData" class="danger" type="button">Recomeçar o sistema do zero</button>
+          <label>Voltar ao backup do dia<select id="systemBackupSelect"><option value="">Carregando backups...</option></select></label>
+          <button id="restoreSystemBackup" type="button" disabled>Restaurar backup selecionado</button>
+        </div></details>
+        <small id="rebuildAllDatabaseStatus" aria-live="polite">Antes de apagar ou restaurar, o sistema cria um snapshot completo de segurança em /var/data/system-backups.</small>
       </section>
       <!-- Status inicial e estatísticas após o upload. -->
       <section class="status-box" id="statusBox" aria-live="polite">
@@ -14137,7 +14145,7 @@
   </script>
   <script src="/assets/vendas-upload.js?v=24-20260828-rebuild-all"></script>
   <link rel="stylesheet" href="/assets/tratador-vendas.css?v=8-20260821-imposto-editavel">
-  <script src="/assets/tratador-vendas.js?v=25-20260828-rebuild-all"></script>
+  <script src="/assets/tratador-vendas.js?v=26-20260908-system-backups"></script>
   <link rel="stylesheet" href="/assets/base-tratada-vendas.css?v=1-20260730">
   <script src="/assets/base-tratada-vendas.js?v=1-20260730"></script>
   <link rel="stylesheet" href="/assets/frete-combinar.css?v=1-20260730">
@@ -14158,7 +14166,29 @@
     (function () {
       var button = document.getElementById('rebuildAllDatabase');
       var status = document.getElementById('rebuildAllDatabaseStatus');
+      var resetButton = document.getElementById('resetAllSystemData');
+      var restoreButton = document.getElementById('restoreSystemBackup');
+      var backupSelect = document.getElementById('systemBackupSelect');
       if (!button || !status) return;
+      function backupLabel(item) {
+        var date = new Date(item.createdAt);
+        var size = Number(item.bytes) < 1048576 ? (Number(item.bytes) / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' KB' : (Number(item.bytes) / 1048576).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + ' MB';
+        return date.toLocaleString('pt-BR') + ' · ' + size + ' · ' + String(item.reason || 'backup').replaceAll('-', ' ');
+      }
+      async function loadSystemBackups() {
+        try {
+          var response = await fetch('/api/system-data', { cache: 'no-store' });
+          var result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Não foi possível consultar os backups.');
+          var backups = Array.isArray(result.backups) ? result.backups : [];
+          backupSelect.innerHTML = '<option value="">' + (backups.length ? 'Selecione a data do backup' : 'Nenhum snapshot completo disponível') + '</option>' + backups.map(function (item) { return '<option value="' + item.id + '">' + backupLabel(item) + '</option>'; }).join('');
+          restoreButton.disabled = true;
+        } catch (error) {
+          backupSelect.innerHTML = '<option value="">Falha ao carregar backups</option>';
+          status.textContent = error.message;
+        }
+      }
+      backupSelect.addEventListener('change', function () { restoreButton.disabled = !backupSelect.value; });
       button.addEventListener('click', async function () {
         if (!confirm('ATENÇÃO: limpar a Base de Dados atual e reconstruir todos os meses com os tratamentos salvos de Vendas e ADS?\n\nUm backup automático será criado antes da limpeza.')) return;
         var password = prompt('Informe a senha administrativa para reconstruir toda a Base de Dados:');
@@ -14183,6 +14213,35 @@
           button.textContent = original;
         }
       });
+      resetButton.addEventListener('click', async function () {
+        if (!confirm('PERIGO: esta ação apagará bases de Vendas e ADS, arquivos brutos e tratados, canais, custos, estoque, financeiro, orçamentos e configurações persistidas.\n\nUm snapshot integral será criado antes da limpeza. Deseja continuar?')) return;
+        if (prompt('Para confirmar, digite exatamente: RECOMEÇAR DO ZERO') !== 'RECOMEÇAR DO ZERO') return alert('Confirmação incorreta. Nenhum dado foi apagado.');
+        var password = prompt('Informe a senha administrativa para reiniciar o sistema:');
+        if (!password) return;
+        try {
+          resetButton.disabled = true; status.textContent = 'Criando snapshot completo e limpando todos os dados...';
+          var response = await fetch('/api/system-data', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': password }, body: JSON.stringify({ action: 'reset', confirm: true }) });
+          var result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível reiniciar o sistema.');
+          localStorage.clear();
+          alert('Sistema reiniciado do zero. Backup de segurança: ' + result.safetyBackup.id + '.');
+          window.location.reload();
+        } catch (error) { status.textContent = error.message; alert(error.message); resetButton.disabled = false; }
+      });
+      restoreButton.addEventListener('click', async function () {
+        var backupId = backupSelect.value, label = backupSelect.options[backupSelect.selectedIndex].text;
+        if (!backupId || !confirm('Restaurar o sistema inteiro para:\n\n' + label + '\n\nO estado atual será salvo automaticamente antes da restauração.')) return;
+        var password = prompt('Informe a senha administrativa para restaurar este backup:');
+        if (!password) return;
+        try {
+          restoreButton.disabled = true; status.textContent = 'Criando backup do estado atual e restaurando o snapshot selecionado...';
+          var response = await fetch('/api/system-data', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': password }, body: JSON.stringify({ action: 'restore', backupId: backupId, confirm: true }) });
+          var result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível restaurar o backup.');
+          localStorage.clear();
+          alert('Backup restaurado com sucesso. Uma cópia do estado anterior também foi preservada.');
+          window.location.reload();
+        } catch (error) { status.textContent = error.message; alert(error.message); restoreButton.disabled = false; }
+      });
+      loadSystemBackups();
     })();
   </script>
 </body>

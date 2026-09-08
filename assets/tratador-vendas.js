@@ -288,7 +288,7 @@
       if(published===false)throw new Error('Nao foi possivel concluir a publicacao das bases.');
       status.textContent=updatedMonths+' tratamento(s), '+updatedRows.toLocaleString('pt-BR')+' vendas recalculadas e republicadas com o CMV atual. Backup: '+clearResult.backup+'.';
       if(!options.silent)alert('Atualizacao concluida. Todas as contas foram mantidas e o CMV foi recalculado em '+updatedMonths+' tratamento(s).');
-      return {updatedMonths:updatedMonths,updatedRows:updatedRows,backup:clearResult.backup};
+      return {updatedMonths:updatedMonths,updatedRows:updatedRows,backup:clearResult.systemBackup||clearResult.backup};
     }catch(error){status.textContent=error.message;if(options.silent)throw error;alert(error.message);}finally{button.disabled=false;button.textContent=original;}
   }
   window.salesTreatersIntegration={

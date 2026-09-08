@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const os = require('os');
 const { transformShopee } = require('./lib/shopee-transform');
 const { transformTikTok, transformAmazon, transformMagalu } = require('./lib/marketplace-transforms');
+const { createSystemBackup, listSystemBackups, resetSystemData, restoreSystemBackup } = require('./lib/system-data-backups');
 
 
 function loadLocalEnv(filePath) {
@@ -2454,6 +2455,7 @@ async function handleClearPublishedSalesBases(request, response) {
   try {
     const payload = await collectJsonRequest(request, 64 * 1024);
     if (payload.confirm !== true) return sendJson(response, 400, { error: 'Confirme a substituicao integral das bases.' });
+    const systemBackup = createSystemBackup(dataDir, 'antes-de-reconstruir-base');
     const metadata = readMetadata();
     const area = metadata.areas && metadata.areas.area1 || { months: {} };
     const monthEntries = Object.entries(area.months || {});
@@ -2480,6 +2482,7 @@ async function handleClearPublishedSalesBases(request, response) {
       removedMonths: monthEntries.length,
       removedFiles,
       backup: path.relative(dataDir, backupDir).replace(/\\/g, '/'),
+      systemBackup: systemBackup.id,
       replacedAt: metadata.areas.area1.replacedAt
     });
   } catch (error) {
@@ -2686,6 +2689,26 @@ function removeCostValuesFromRows(sourceRows) {
     }
   });
   return rows;
+}
+
+async function handleSystemDataManagement(request, response) {
+  if (request.method === 'GET') {
+    return sendJson(response, 200, { backups: listSystemBackups(dataDir) });
+  }
+  if (!requireAdmin(request, response)) return;
+  try {
+    const payload = await collectJsonRequest(request, 64 * 1024);
+    if (payload.confirm !== true) return sendJson(response, 400, { error: 'Confirme a operação sobre todos os dados do sistema.' });
+    let result;
+    if (payload.action === 'reset') result = resetSystemData(dataDir);
+    else if (payload.action === 'restore') result = restoreSystemBackup(dataDir, payload.backupId);
+    else return sendJson(response, 400, { error: 'Ação de gerenciamento de dados inválida.' });
+    intelligentAnalysisMemoryCache = null;
+    sendJson(response, 200, { ...result, backups: listSystemBackups(dataDir) });
+  } catch (error) {
+    console.error('Erro ao gerenciar os dados completos do sistema:', error);
+    sendJson(response, 500, { error: error.message || 'Não foi possível concluir a operação.' });
+  }
 }
 
 function clearPersistedCostValues() {
@@ -4955,6 +4978,11 @@ const server = http.createServer((request, response) => {
 
   if (request.method === 'POST' && requestPath === '/api/sales-treaters/clear-published') {
     handleClearPublishedSalesBases(request, response);
+    return;
+  }
+
+  if ((request.method === 'GET' || request.method === 'POST') && requestPath === '/api/system-data') {
+    handleSystemDataManagement(request, response);
     return;
   }
 
