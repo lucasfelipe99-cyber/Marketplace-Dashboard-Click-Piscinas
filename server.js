@@ -1284,7 +1284,7 @@ async function handleAdsBaseUpload(request, response) {
     const marketplaceSale = adsMarketplaceSaleName(platform, account);
     const marketplaceSaleKey = normalizeAdsText(marketplaceSale);
     const incomingRows = Array.isArray(payload.rows) ? payload.rows : [];
-    if (!month || !account || !['mercado livre', 'shopee'].includes(platformKey)) {
+    if (!month || !account || !['mercado livre', 'shopee', 'tiktok'].includes(platformKey)) {
       sendJson(response, 400, { error: 'Selecione um mês e uma plataforma válidos.' });
       return;
     }

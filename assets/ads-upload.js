@@ -13,7 +13,7 @@
     '<h2>Subir Base de ADS Actual</h2><p>A nova carga substitui integralmente o ADS anterior da conta e do mês selecionados, sem alterar as linhas de vendas.</p></div>' +
     '<span class="sales-upload-badge">ADS → Base de Dados</span></div>' +
     '<div class="sales-upload-grid"><div class="sales-upload-card">' +
-    '<label class="sales-upload-password">Plataforma<select id="adsUploadPlatform"><option value="Mercado Livre">Mercado Livre</option><option value="Shopee">Shopee</option></select></label>' +
+    '<label class="sales-upload-password">Plataforma<select id="adsUploadPlatform"><option value="Mercado Livre">Mercado Livre</option><option value="Shopee">Shopee</option><option value="TikTok">TikTok</option></select></label>' +
     '<label class="sales-upload-password">Conta / Marketplace venda<select id="adsUploadAccount"><option value="">Carregando contas cadastradas...</option></select></label>' +
     '<label class="sales-upload-password">Mês da Base de Dados<select id="adsUploadMonth"></select></label>' +
     '<label class="sales-upload-password">Senha administrativa<input id="adsUploadPassword" type="password" autocomplete="current-password" placeholder="Informe a senha"></label>' +
@@ -153,6 +153,29 @@
       rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'ADS F',subcategory:'ADS F',value:item.revenue});
       rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
       rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'Cliques',subcategory:'Cliques',value:item.clicks});
+    });
+    return{rows:rows,sourceRows:sourceRows,ads:aggregate.size,duplicatesConsolidated:sourceRows-aggregate.size,minDate:'',maxDate:''};
+  }
+  function parseTikTokAdsRaw(matrix,account){
+    if(!matrix||!matrix.length)throw new Error('O relatório de ADS do TikTok está vazio.');
+    var normalized=matrix.map(function(row){return (row||[]).map(function(value){return clean(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ');});});
+    var headerIndex=normalized.findIndex(function(row){return row.indexOf('nome do produto')>=0&&row.indexOf('id do produto')>=0&&row.indexOf('custo')>=0&&row.indexOf('receita bruta')>=0;});
+    if(headerIndex<0)throw new Error('As colunas Nome do produto, ID do produto, Custo e Receita bruta não foram encontradas no relatório do TikTok.');
+    var headers=normalized[headerIndex];
+    function column(name){return headers.indexOf(name);}
+    var idx={name:column('nome do produto'),ad:column('id do produto'),investment:column('custo'),revenue:column('receita bruta')};
+    var aggregate=new Map(),sourceRows=0;
+    matrix.slice(headerIndex+1).forEach(function(row){
+      var productId=clean(row[idx.ad]),name=clean(row[idx.name]),ad=productId&&productId!=='-'?productId:name;
+      if(!ad)return;
+      sourceRows+=1;
+      var key=[account,ad].join('\u001f'),current=aggregate.get(key)||{ad:ad,revenue:0,investment:0,sourceRows:0};
+      current.revenue+=numberValue(row[idx.revenue]);current.investment+=numberValue(row[idx.investment]);current.sourceRows+=1;aggregate.set(key,current);
+    });
+    if(!aggregate.size)throw new Error('Nenhum anúncio válido foi encontrado no relatório do TikTok.');
+    var rows=[];aggregate.forEach(function(item){
+      rows.push({marketplace:'TikTok',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'ADS F',subcategory:'ADS F',value:item.revenue});
+      rows.push({marketplace:'TikTok',marketplaceSale:account,sku:'',ad:item.ad,date:'',category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
     });
     return{rows:rows,sourceRows:sourceRows,ads:aggregate.size,duplicatesConsolidated:sourceRows-aggregate.size,minDate:'',maxDate:''};
   }
@@ -299,8 +322,10 @@
           var current=prepared[fileIndex],file=current.file,day=current.day,transformed=null;
           button.textContent='Tratando '+(fileIndex+1)+' de '+prepared.length+'...';
           accountStatus.textContent='Dia '+day+' · '+file.name;
-          if(platform==='Mercado Livre'||platform==='Shopee'){
-            transformed=platform==='Mercado Livre'?parseMercadoLivreRaw(await readRawWorkbook(file),account):parseShopeeRaw(await readWorkbook(file),account);
+          if(platform==='Mercado Livre'||platform==='Shopee'||platform==='TikTok'){
+            if(platform==='Mercado Livre')transformed=parseMercadoLivreRaw(await readRawWorkbook(file),account);
+            else if(platform==='Shopee')transformed=parseShopeeRaw(await readWorkbook(file),account);
+            else transformed=parseTikTokAdsRaw(await readWorkbook(file),account);
             var selectedDate=[year,String(month).padStart(2,'0'),String(day).padStart(2,'0')].join('-');
             transformed.rows.forEach(function(row){row.date=selectedDate;});
             transformed.minDate=selectedDate;transformed.maxDate=selectedDate;
@@ -361,7 +386,7 @@
       var response = await fetch('/api/ads-base', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Password': password },
         body: JSON.stringify({ month: monthSelect.value, platform: platformSelect.value, account: accountSelect.value, rows: preview.rows, append: true }) });
       var result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível publicar a base de ADS.');
-      statusBox.innerHTML = '<strong>ADS incorporado à Base de Vendas</strong><br>' + result.added.toLocaleString('pt-BR') + ' linhas de Publicidade, Cliques e ADS F adicionadas · ' + result.replaced.toLocaleString('pt-BR') + ' métricas do mesmo anúncio e dia atualizadas. As vendas foram preservadas.';
+      statusBox.innerHTML = '<strong>ADS incorporado à Base de Vendas</strong><br>' + result.added.toLocaleString('pt-BR') + ' linhas de métricas de ADS adicionadas · ' + result.replaced.toLocaleString('pt-BR') + ' métricas do mesmo anúncio e dia atualizadas. As vendas foram preservadas.';
       document.getElementById('adsUploadPassword').value = '';
       setTimeout(function () { window.location.reload(); }, 900);
     } catch (error) { statusBox.textContent = error.message; publishButton.disabled = false; publishButton.textContent = 'Adicionar à Base de Dados'; }
@@ -375,11 +400,14 @@
       for(var index=0;index<rows.length;index+=1){
         var item=rows[index];
         if(typeof onProgress==='function')onProgress('Retratando ADS · '+item.platform+' - '+item.account+' · '+monthNames[Number(item.month)-1]+'/'+item.year+' · dia '+item.day+' ('+(index+1)+' de '+rows.length+')...');
-        if(item.platform==='Mercado Livre'||item.platform==='Shopee'){
+        if(item.platform==='Mercado Livre'||item.platform==='Shopee'||item.platform==='TikTok'){
           var rawResponse=await fetch('/api/ads-treater/file?id='+encodeURIComponent(item.id),{cache:'no-store'});
           if(!rawResponse.ok)throw new Error('O arquivo bruto da subida '+item.sequence+' do dia '+item.day+' não está disponível para retratamento.');
           var rawFile=new File([await rawResponse.blob()],item.fileName||('ads-'+item.day+'.xlsx'));
-          var transformed=item.platform==='Mercado Livre'?parseMercadoLivreRaw(await readRawWorkbook(rawFile),item.account):parseShopeeRaw(await readWorkbook(rawFile),item.account);
+          var transformed;
+          if(item.platform==='Mercado Livre')transformed=parseMercadoLivreRaw(await readRawWorkbook(rawFile),item.account);
+          else if(item.platform==='Shopee')transformed=parseShopeeRaw(await readWorkbook(rawFile),item.account);
+          else transformed=parseTikTokAdsRaw(await readWorkbook(rawFile),item.account);
           var selectedDate=[item.year,String(item.month).padStart(2,'0'),String(item.day).padStart(2,'0')].join('-');
           transformed.rows.forEach(function(row){row.date=selectedDate;});
           var saveResponse=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'save-treated',id:item.id,rows:transformed.rows})}),saveResult=await saveResponse.json();
