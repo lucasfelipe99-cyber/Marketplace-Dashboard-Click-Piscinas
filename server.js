@@ -1894,7 +1894,7 @@ function normalizeMasterText(value) {
 
 function readProductMaster() {
   if (!fs.existsSync(productMasterPath)) {
-    return { version: 1, categories: [], skus: {}, updatedAt: null };
+    return { version: 1, categories: [], skus: {}, deletedSkus: [], updatedAt: null };
   }
   try {
     const value = JSON.parse(fs.readFileSync(productMasterPath, 'utf8'));
@@ -1902,10 +1902,11 @@ function readProductMaster() {
       version: 1,
       categories: Array.isArray(value.categories) ? value.categories : [],
       skus: value.skus && typeof value.skus === 'object' ? value.skus : {},
+      deletedSkus: Array.isArray(value.deletedSkus) ? value.deletedSkus : [],
       updatedAt: value.updatedAt || null
     };
   } catch (error) {
-    return { version: 1, categories: [], skus: {}, updatedAt: null };
+    return { version: 1, categories: [], skus: {}, deletedSkus: [], updatedAt: null };
   }
 }
 
@@ -1925,7 +1926,10 @@ function applyProductCategoriesToRowsFile(filePath) {
   }
   const descriptionIndex = normalizedHeaders.findIndex((header) => ['descricao', 'titulo do anuncio'].includes(header));
   const marketplaceIndex = normalizedHeaders.indexOf('marketplace');
+  const adsCategoryIndex = normalizedHeaders.indexOf('categoria');
+  const adsSubcategoryIndex = normalizedHeaders.findIndex((header) => ['sub categoria', 'subcategoria'].includes(header));
   const master = readProductMaster();
+  const deletedSkus = new Set((master.deletedSkus || []).map(normalizeMasterText));
   const categoryNames = Object.fromEntries((master.categories || []).map((category) => [category.id, category.name]));
   const categoryBySku = {};
   Object.keys(master.skus || {}).forEach((masterSku) => {
@@ -1940,7 +1944,7 @@ function applyProductCategoriesToRowsFile(filePath) {
   let masterChanged = false;
   rows.slice(1).forEach((row) => {
     const sku = String(row[skuIndex] || '').trim();
-    if (!sku) return;
+    if (!sku || deletedSkus.has(normalizeMasterText(sku)) || isAdsMetricRow(row, { category: adsCategoryIndex, subcategory: adsSubcategoryIndex })) return;
     const existing = master.skus[sku] || {};
     if (!existing.sku) masterChanged = true;
     master.skus[sku] = {
@@ -1969,6 +1973,7 @@ function syncProductMasterFromPublishedRows(master) {
   const metadata = readMetadata();
   const months = Object.values(metadata.areas.area1 && metadata.areas.area1.months || {});
   let changed = false;
+  const deletedSkus = new Set((master.deletedSkus || []).map(normalizeMasterText));
 
   months.forEach((month) => {
     const rowsName = month && month.rowsName;
@@ -1982,10 +1987,12 @@ function syncProductMasterFromPublishedRows(master) {
       const skuIndex = findIndex(['sku']);
       const descriptionIndex = findIndex(['descricao', 'descrição', 'descria§ao', 'titulo do anuncio', 'título do anúncio']);
       const marketplaceIndex = findIndex(['marketplace']);
+      const categoryIndex = findIndex(['categoria']);
+      const subcategoryIndex = findIndex(['sub categoria', 'subcategoria']);
       if (skuIndex < 0) return;
       rows.slice(1).forEach((row) => {
         const sku = String(row[skuIndex] || '').trim();
-        if (!sku) return;
+        if (!sku || deletedSkus.has(normalizeMasterText(sku)) || isAdsMetricRow(row, { category: categoryIndex, subcategory: subcategoryIndex })) return;
         const existing = master.skus[sku] || {};
         master.skus[sku] = {
           sku,
@@ -2042,6 +2049,17 @@ async function handleProductMasterUpdate(request, response) {
       skus.forEach((sku) => {
         if (master.skus[sku]) master.skus[sku].categoryId = categoryId;
       });
+    } else if (payload.action === 'delete-skus') {
+      const skus = Array.isArray(payload.skus)
+        ? [...new Set(payload.skus.map((sku) => String(sku || '').trim()).filter(Boolean))]
+        : [];
+      if (!skus.length) return sendJson(response, 400, { error: 'Nenhum SKU foi selecionado.' });
+      const deleted = new Set((master.deletedSkus || []).map(normalizeMasterText));
+      skus.forEach((sku) => {
+        delete master.skus[sku];
+        deleted.add(normalizeMasterText(sku));
+      });
+      master.deletedSkus = Array.from(deleted).filter(Boolean).sort();
     } else if (payload.action === 'import-categories') {
       const summary = applyProductCategoryImport(master, payload.rows);
       master.lastCategoryImport = { ...summary, importedAt: new Date().toISOString() };
@@ -2849,8 +2867,11 @@ function findPublishedSkusWithoutCost(costs) {
       const categoryIndex = indexOf(['categoria2', 'categoria']);
       const adIndex = indexOf(['id anuncio', 'id do anuncio', '# de anuncio', 'id do produto']);
       const marketplaceSaleIndex = indexOf(['marketplace venda']);
+      const adsCategoryIndex = indexOf(['categoria']);
+      const adsSubcategoryIndex = indexOf(['sub categoria', 'subcategoria']);
       if (skuIndex < 0 && adIndex < 0 && descriptionIndex < 0) return;
       rows.slice(1).forEach((row) => {
+        if (isAdsMetricRow(row, { category: adsCategoryIndex, subcategory: adsSubcategoryIndex })) return;
         const marketplaceSale = marketplaceSaleIndex >= 0 ? String(row[marketplaceSaleIndex] || '').trim() : '';
         const description = descriptionIndex >= 0 ? String(row[descriptionIndex] || '').trim() : '';
         const sku = String(skuIndex >= 0 ? row[skuIndex] || '' : '').trim()

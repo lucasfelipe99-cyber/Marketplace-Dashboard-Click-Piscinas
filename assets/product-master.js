@@ -11,6 +11,7 @@
   var pendingOnly = false;
   var bulkCategoryId = '';
   var categoryImportRows = null;
+  var selectedSkus = new Set();
 
   function escapeValue(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
@@ -199,6 +200,8 @@
       '<div class="product-master-field"><label for="skuBulkCategory">Categoria para os filtrados</label><select id="skuBulkCategory">' +
       categoryOptions(bulkCategoryId) + '</select></div><button class="product-master-button" id="assignFilteredSkus" type="button"' +
       (!visible.length ? ' disabled' : '') + '>Enviar ' + visible.length.toLocaleString('pt-BR') + ' para categoria</button>' +
+      '<button class="product-master-button danger" id="deleteSelectedSkus" type="button"' +
+      (!selectedSkus.size ? ' disabled' : '') + '>Excluir selecionados (' + selectedSkus.size.toLocaleString('pt-BR') + ')</button>' +
       '<div class="product-master-file-actions"><button class="product-master-button secondary" id="exportSkuCategories" type="button">Baixar Excel</button>' +
       '<label class="product-master-file-button">Selecionar Excel<input id="importSkuCategoriesFile" type="file" accept=".xlsx,.xls"></label>' +
       '<button class="product-master-button" id="importSkuCategories" type="button" disabled>Importar categorias</button></div></div></section>' +
@@ -208,9 +211,9 @@
       pending.toLocaleString('pt-BR') + '</strong><span>Pendentes de categoria</span></div><div class="product-master-stat"><strong>' +
       (all.length - pending).toLocaleString('pt-BR') + '</strong><span>Categorizados</span></div></div>' +
       '<p class="product-master-note">Exibindo ' + visible.length.toLocaleString('pt-BR') + ' SKUs.</p>' +
-      '<div class="product-master-table-wrap"><table class="product-master-table"><thead><tr><th>SKU</th><th>Descrição</th><th>Marketplace</th><th>Categoria oficial</th><th>Status</th></tr></thead><tbody>' +
+      '<div class="product-master-table-wrap"><table class="product-master-table"><thead><tr><th class="product-master-check"><input id="selectAllVisibleSkus" type="checkbox" aria-label="Selecionar todos os SKUs exibidos"></th><th>SKU</th><th>Descrição</th><th>Marketplace</th><th>Categoria oficial</th><th>Status</th></tr></thead><tbody>' +
       visible.map(function (item) {
-        return '<tr><td>' + escapeValue(item.sku) + '</td><td>' + escapeValue(item.description || '—') + '</td><td>' +
+        return '<tr><td class="product-master-check"><input class="sku-row-check" type="checkbox" data-sku="' + escapeValue(item.sku) + '"' + (selectedSkus.has(item.sku) ? ' checked' : '') + ' aria-label="Selecionar SKU ' + escapeValue(item.sku) + '"></td><td>' + escapeValue(item.sku) + '</td><td>' + escapeValue(item.description || '—') + '</td><td>' +
           escapeValue(item.marketplace || '—') + '</td><td><select class="sku-category-select" data-sku="' + escapeValue(item.sku) + '">' +
           categoryOptions(item.categoryId) + '</select></td><td class="' + (item.categoryId ? 'sku-saved' : 'sku-pending') + '">' +
           (item.categoryId ? 'Categorizado' : 'Pendente') + '</td></tr>';
@@ -229,6 +232,31 @@
     });
     document.getElementById('skuBulkCategory').addEventListener('change', function () {
       bulkCategoryId = this.value;
+    });
+    var selectAll = document.getElementById('selectAllVisibleSkus');
+    selectAll.checked = visible.length > 0 && visible.every(function (item) { return selectedSkus.has(item.sku); });
+    selectAll.addEventListener('change', function () {
+      visible.forEach(function (item) { if (selectAll.checked) selectedSkus.add(item.sku); else selectedSkus.delete(item.sku); });
+      renderSkus();
+    });
+    skuContainer.querySelectorAll('.sku-row-check').forEach(function (checkbox) {
+      checkbox.addEventListener('change', function () {
+        if (this.checked) selectedSkus.add(this.dataset.sku); else selectedSkus.delete(this.dataset.sku);
+        renderSkus();
+      });
+    });
+    document.getElementById('deleteSelectedSkus').addEventListener('click', async function () {
+      var selected = Array.from(selectedSkus), status = document.getElementById('skuStatus'), button = this;
+      if (!selected.length || !window.confirm('Excluir ' + selected.length.toLocaleString('pt-BR') + ' SKU(s) selecionado(s)? Eles não voltarão automaticamente ao recarregar a base.')) return;
+      try {
+        button.disabled = true; status.className = 'product-master-status'; status.textContent = 'Excluindo SKUs selecionados...';
+        await updateMaster({ action: 'delete-skus', skus: selected });
+        selectedSkus.clear(); renderSkus();
+        document.getElementById('skuStatus').className = 'product-master-status success';
+        document.getElementById('skuStatus').textContent = selected.length.toLocaleString('pt-BR') + ' SKU(s) excluído(s) do cadastro.';
+      } catch (error) {
+        status.className = 'product-master-status error'; status.textContent = error.message; button.disabled = false;
+      }
     });
     document.getElementById('assignFilteredSkus').addEventListener('click', async function () {
       var button = this;
