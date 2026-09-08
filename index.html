@@ -12885,6 +12885,10 @@
     }
 
     function shouldShowSummaryPercent(item) {
+      if (item && (item.collapseGroup === 'marketplace-expenses' || item.collapseGroup === 'total-cost')) {
+        return true;
+      }
+
       const rows = [
         '03.Despesas Marketplace',
         'Comissão',
