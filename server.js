@@ -1457,13 +1457,14 @@ async function handleAdsBaseUpload(request, response) {
       return;
     }
     // ADS complementa a Base de Vendas e nunca remove vendas. Nas bases diárias,
-    // substitui apenas a mesma métrica do anúncio/data. Na base unificada Magalu,
-    // substitui todas as métricas de ADS da conta e do mês selecionados.
+    // substitui apenas a mesma métrica do anúncio/data. Nas bases mensais
+    // consolidadas da Magalu e da Shopee, substitui todas as métricas de ADS
+    // da conta e do mês selecionados.
     const keptRows = savedRows.slice(1);
     let replaced = 0;
     const incomingMetricKeys = new Set(uniqueIncomingRows.map((source) => [platformKey, marketplaceSaleKey,
       normalizeAdsText(source.ad), adsDateKey(source.date), normalizeAdsText(source.category), normalizeAdsText(source.subcategory)].join('||')));
-    const replaceChannelMonth = payload.replaceChannelMonth === true && platformKey === 'magalu';
+    const replaceChannelMonth = payload.replaceChannelMonth === true && ['magalu', 'shopee'].includes(platformKey);
     for (let index = keptRows.length - 1; index >= 0; index -= 1) {
       const row = keptRows[index];
       if (!isAdsMetricRow(row, indexes)) continue;
@@ -1829,7 +1830,7 @@ async function handleAdsTreaterUploads(request, response) {
     const fileName = path.basename(String(payload.fileName || '').trim());
     const extension = path.extname(fileName).toLowerCase();
     const data = String(payload.dataBase64 || '');
-    const unified = payload.unified === true && normalizeAdsText(platform) === 'magalu';
+    const unified = payload.unified === true && ['magalu', 'shopee'].includes(normalizeAdsText(platform));
     if (!platform || !account || !Number.isInteger(year) || year < 2020 || year > 2100 || !Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(day) || day < 1 || day > 31) {
       return sendJson(response, 400, { error: 'Informe plataforma, conta, ano, mês e dia válidos.' });
     }

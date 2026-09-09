@@ -139,22 +139,26 @@
     if(headerIndex<0)throw new Error('As colunas Nome do Anúncio, Cliques, GMV e Despesas não foram encontradas no relatório da Shopee.');
     var headers=normalized[headerIndex];
     function column(name){return headers.indexOf(name);}
-    var idx={name:column('nome do anuncio'),ad:column('id do produto'),clicks:column('cliques'),revenue:column('gmv'),investment:column('despesas')};
+    function columnContains(name){return headers.findIndex(function(header){return header.indexOf(name)>=0;});}
+    var idx={name:column('nome do anuncio'),ad:column('id do produto'),sku:columnContains('sku de referencia'),clicks:column('cliques'),revenue:column('gmv'),investment:column('despesas'),date:column('data')};
+    var unified=idx.sku>=0&&idx.date>=0;
     var aggregate=new Map(),sourceRows=0;
     matrix.slice(headerIndex+1).forEach(function(row){
-      var productId=clean(row[idx.ad]),name=clean(row[idx.name]),ad=productId&&productId!=='-'?productId:name;
-      if(!ad)return;
+      var productId=clean(row[idx.ad]),name=clean(row[idx.name]),sku=idx.sku>=0?clean(row[idx.sku]):'',ad=productId&&productId!=='-'?productId:name,date=idx.date>=0?excelDate(row[idx.date]):'';
+      if(!ad||(unified&&!date))return;
       sourceRows+=1;
-      var key=[account,ad].join('\u001f'),current=aggregate.get(key)||{ad:ad,title:name,revenue:0,investment:0,clicks:0,sourceRows:0};
+      var key=[account,date,ad].join('\u001f'),current=aggregate.get(key)||{sku:sku,ad:ad,title:name,date:date,revenue:0,investment:0,clicks:0,sourceRows:0};
+      if(!current.sku&&sku)current.sku=sku;
       current.revenue+=numberValue(row[idx.revenue]);current.investment+=numberValue(row[idx.investment]);current.clicks+=numberValue(row[idx.clicks]);current.sourceRows+=1;aggregate.set(key,current);
     });
     if(!aggregate.size)throw new Error('Nenhum anúncio válido foi encontrado no relatório da Shopee.');
     var rows=[];aggregate.forEach(function(item){
-      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:'',category:'ADS F',subcategory:'ADS F',value:item.revenue});
-      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:'',category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
-      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:'',ad:item.ad,title:item.title,date:'',category:'Cliques',subcategory:'Cliques',value:item.clicks});
+      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:item.sku,ad:item.ad,title:item.title,date:item.date,category:'ADS F',subcategory:'ADS F',value:item.revenue});
+      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:item.sku,ad:item.ad,title:item.title,date:item.date,category:'03.Despesas Marketplace',subcategory:'Publicidade',value:-Math.abs(item.investment)});
+      rows.push({marketplace:'Shopee',marketplaceSale:account,sku:item.sku,ad:item.ad,title:item.title,date:item.date,category:'Cliques',subcategory:'Cliques',value:item.clicks});
     });
-    return{rows:rows,sourceRows:sourceRows,ads:aggregate.size,duplicatesConsolidated:sourceRows-aggregate.size,minDate:'',maxDate:''};
+    var dates=Array.from(aggregate.values()).map(function(item){return item.date;}).filter(Boolean).sort();
+    return{rows:rows,sourceRows:sourceRows,ads:aggregate.size,duplicatesConsolidated:sourceRows-aggregate.size,minDate:dates[0]||'',maxDate:dates[dates.length-1]||'',unified:unified};
   }
   function parseTikTokAdsRaw(matrix,account){
     if(!matrix||!matrix.length)throw new Error('O relatório de ADS do TikTok está vazio.');
@@ -238,8 +242,8 @@
         return '<details class="ads-account-month'+(rows.length?' is-filled':'')+'"><summary><span><strong>'+name+' / '+year+'</strong><small>'+(rows.length?rows.length+' subida(s)':'Ainda não alimentado')+'</small></span><i aria-hidden="true">⌄</i></summary><div class="ads-account-month-content">'+(rows.length?rows.map(uploadMarkup).join(''):'<p>Nenhum arquivo cadastrado neste mês.</p>')+'</div></details>';
       }).join('');
       var treatedCount=accountRows.filter(function(item){return item.status==='treated'||item.status==='published';}).length,currentInfo=treatedMonthInfo(accountRows,defaultYear,now.getMonth()+1),currentLabel=monthNames[now.getMonth()]+'/'+defaultYear;
-      var unified=clean(account.marketplace).toLowerCase()==='magalu';
-      return '<article class="ads-account-card" data-ads-account="'+escapeHtml(account.account)+'" data-ads-platform="'+escapeHtml(account.marketplace)+'" data-sales-channel-id="'+escapeHtml(account.channelId||'')+'" data-card-year="'+defaultYear+'"><header><div><span>'+escapeHtml(account.marketplace)+'</span><h3>'+escapeHtml(account.account)+'</h3></div><div class="ads-account-controls"><label>Mês<select data-card-month>'+monthOptions+'</select></label><label class="ads-card-file">'+(unified?'Selecionar base mensal unificada':'Selecionar relatórios brutos')+'<input data-card-file type="file"'+(unified?'':' multiple')+' accept=".xlsx,.xlsm,.xls,.csv,.zip,.txt"></label><button type="button" data-card-save>'+(unified?'Substituir e tratar base mensal':'Tratar e salvar arquivos')+'</button><button type="button" data-republish-selected'+(currentInfo?'':' disabled')+'>Republicar mês selecionado ('+currentLabel+')</button><button type="button" class="ads-delete-channel" data-delete-channel>Excluir canal</button></div></header><div class="ads-account-meta">Vinculado ao Tratador de Vendas · '+(unified?'A nova base unificada substitui integralmente a carga Magalu anterior deste mês.':'O dia é identificado automaticamente pelo nome de cada arquivo (ex.: 1.xlsx = dia 1).')+' · '+accountRows.length+' subida(s) no disco · '+treatedCount+' tratada(s) · <span data-selected-month-info>'+(currentInfo?'Dias disponíveis em '+currentLabel+': '+currentInfo.days.join(', '):'Nenhum dia tratado em '+currentLabel+'.')+'</span></div><div class="ads-account-operation" data-account-status></div><h4 class="ads-monthly-title">Controle mensal de arquivos</h4><div class="ads-account-month-grid">'+months+'</div></article>';
+      var unified=['magalu','shopee'].indexOf(clean(account.marketplace).toLowerCase())>=0;
+      return '<article class="ads-account-card" data-ads-account="'+escapeHtml(account.account)+'" data-ads-platform="'+escapeHtml(account.marketplace)+'" data-sales-channel-id="'+escapeHtml(account.channelId||'')+'" data-card-year="'+defaultYear+'"><header><div><span>'+escapeHtml(account.marketplace)+'</span><h3>'+escapeHtml(account.account)+'</h3></div><div class="ads-account-controls"><label>Mês<select data-card-month>'+monthOptions+'</select></label><label class="ads-card-file">'+(unified?'Selecionar base mensal consolidada':'Selecionar relatórios brutos')+'<input data-card-file type="file"'+(unified?'':' multiple')+' accept=".xlsx,.xlsm,.xls,.csv,.zip,.txt"></label><button type="button" data-card-save>'+(unified?'Substituir e tratar base mensal':'Tratar e salvar arquivos')+'</button><button type="button" data-republish-selected'+(currentInfo?'':' disabled')+'>Republicar mês selecionado ('+currentLabel+')</button><button type="button" class="ads-delete-channel" data-delete-channel>Excluir canal</button></div></header><div class="ads-account-meta">Vinculado ao Tratador de Vendas · '+(unified?'A nova base mensal substitui integralmente o ADS anterior desta conta e mês.':'O dia é identificado automaticamente pelo nome de cada arquivo (ex.: 1.xlsx = dia 1).')+' · '+accountRows.length+' subida(s) no disco · '+treatedCount+' tratada(s) · <span data-selected-month-info>'+(currentInfo?'Dias disponíveis em '+currentLabel+': '+currentInfo.days.join(', '):'Nenhum dia tratado em '+currentLabel+'.')+'</span></div><div class="ads-account-operation" data-account-status></div><h4 class="ads-monthly-title">Controle mensal de arquivos</h4><div class="ads-account-month-grid">'+months+'</div></article>';
     }).join('');
   }
   async function loadHistory(){try{var response=await fetch('/api/ads-treater/uploads',{cache:'no-store'}),result=await response.json();if(!response.ok)throw new Error(result.error||'Não foi possível carregar o histórico.');uploadHistory=result.uploads||[];excludedChannels=result.excludedChannels||[];refreshAccountOptions();renderHistory();}catch(error){historyBox.innerHTML='<div class="ads-treater-empty">'+escapeHtml(error.message)+'</div>';historySummary.textContent='Falha ao carregar';}}
@@ -253,8 +257,7 @@
     else if(platform==='tiktok')transformed=parseTikTokAdsRaw(await readWorkbook(rawFile),item.account);
     else if(platform==='magalu')transformed=parseMagaluAdsRaw(await readWorkbook(rawFile),item.account);
     else throw new Error('Ainda não existe tratamento automático de ADS para '+item.platform+'.');
-    var selectedDate=[item.year,String(item.month).padStart(2,'0'),String(item.day).padStart(2,'0')].join('-');
-    transformed.rows.forEach(function(row){row.date=selectedDate;});
+    if(!transformed.unified){var selectedDate=[item.year,String(item.month).padStart(2,'0'),String(item.day).padStart(2,'0')].join('-');transformed.rows.forEach(function(row){row.date=selectedDate;});}
     var saveResponse=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'save-treated',id:item.id,rows:transformed.rows})}),saveResult=await saveResponse.json();
     if(!saveResponse.ok)throw new Error(saveResult.error||'Não foi possível salvar o tratamento da subida '+item.sequence+'.');
     uploadHistory=saveResult.uploads||uploadHistory;
@@ -359,8 +362,8 @@
       try{
         if(!files.length)throw new Error('Selecione um ou mais arquivos diários de ADS desta conta.');
         if(!password)throw new Error('Informe a senha administrativa no painel abaixo.');
-        var unified=clean(platform).toLowerCase()==='magalu';
-        if(unified&&files.length!==1)throw new Error('Selecione somente uma base mensal unificada da Magalu.');
+        var unified=['magalu','shopee'].indexOf(clean(platform).toLowerCase())>=0;
+        if(unified&&files.length!==1)throw new Error('Selecione somente uma base mensal consolidada.');
         var prepared=files.map(function(file){return{file:file,day:unified?1:dayFromFileName(file.name,year,month),unified:unified};}).sort(function(a,b){return a.day-b.day||a.file.name.localeCompare(b.file.name);});
         button.disabled=true;
         var completed=0,totalRows=0,totalAds=0;
@@ -374,7 +377,7 @@
             else if(platform==='TikTok')transformed=parseTikTokAdsRaw(await readWorkbook(file),account);
             else transformed=parseMagaluAdsRaw(await readWorkbook(file),account);
             if(!unified){var selectedDate=[year,String(month).padStart(2,'0'),String(day).padStart(2,'0')].join('-');transformed.rows.forEach(function(row){row.date=selectedDate;});transformed.minDate=selectedDate;transformed.maxDate=selectedDate;}
-            if(Number(transformed.minDate.slice(0,4))!==year||Number(transformed.minDate.slice(5,7))!==month||Number(transformed.maxDate.slice(0,4))!==year||Number(transformed.maxDate.slice(5,7))!==month)throw new Error('A base Magalu possui datas fora do mês e ano selecionados.');
+            if(Number(transformed.minDate.slice(0,4))!==year||Number(transformed.minDate.slice(5,7))!==month||Number(transformed.maxDate.slice(0,4))!==year||Number(transformed.maxDate.slice(5,7))!==month)throw new Error('A base consolidada possui datas fora do mês e ano selecionados.');
           }
           var response=await fetch('/api/ads-treater/uploads',{method:'POST',headers:{'Content-Type':'application/json','X-Admin-Password':password},body:JSON.stringify({action:'add',platform:platform,account:account,salesChannelId:salesChannelId,year:year,month:month,day:day,fileName:file.name,dataBase64:await fileBase64(file),unified:unified,replaceMonth:unified})}),result=await response.json();
           if(!response.ok)throw new Error(result.error||'Não foi possível salvar "'+file.name+'".');
@@ -385,13 +388,13 @@
           }else uploadHistory=result.uploads||[];
           completed+=1;
         }
-        var successMessage=completed+' arquivo(s) salvo(s) com sucesso. '+totalAds.toLocaleString('pt-BR')+' anúncios e '+totalRows.toLocaleString('pt-BR')+' linhas tratadas. '+(unified?'A base mensal Magalu anterior foi substituída.':'Dias identificados pelo nome dos arquivos.');
+        var successMessage=completed+' arquivo(s) salvo(s) com sucesso. '+totalAds.toLocaleString('pt-BR')+' anúncios e '+totalRows.toLocaleString('pt-BR')+' linhas tratadas. '+(unified?'A base mensal anterior foi substituída.':'Dias identificados pelo nome dos arquivos.');
         accountStatus.innerHTML='<strong>'+successMessage+'</strong>';
         accountCard.querySelector('[data-card-file]').value='';
         renderHistory();
         alert(successMessage);
       }catch(error){accountStatus.textContent=error.message;alert(error.message);}
-      finally{button.disabled=false;button.textContent=clean(platform).toLowerCase()==='magalu'?'Substituir e tratar base mensal':'Tratar e salvar arquivos';}
+      finally{button.disabled=false;button.textContent=['magalu','shopee'].indexOf(clean(platform).toLowerCase())>=0?'Substituir e tratar base mensal':'Tratar e salvar arquivos';}
       return;
     }
     var card=event.target.closest('[data-upload-id]');if(!card)return;var id=card.getAttribute('data-upload-id'),item=uploadHistory.find(function(entry){return entry.id===id;});if(!item)return;
