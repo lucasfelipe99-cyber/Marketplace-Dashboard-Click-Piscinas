@@ -34,6 +34,16 @@ const order=matrix([{ 'Data do Pedido':'01/07/2026 07:01:36','Número do pedido'
 const pack=matrix([{ 'Número do pedido':'LU-1','Status pacote no momento que o relatório foi solicitado':'Pedido entregue','Modalidade de entrega':'Magalu entregas - Coleta' }]);
 result=transformMagalu({orderHeaders:order.headers,orderRows:order.rows,packageHeaders:pack.headers,packageRows:pack.rows,channelName:'Box fan',taxRate:14},db,{'16000000000':'GA1219'});
 assert.equal(result.rows[0][10],'GA1219');assert(Math.abs(result.rows[0][14]+12.03)<1e-9);assert(Math.abs(result.rows[0][23]-14.61)<1e-6);
+const deliveredRow=result.rows[0];
+for (const status of ['Pagamento aprovado','  PAGAMENTO   APROVADO  ','Nota fiscal gerada e aprovada','Pedido despachado']) {
+  const approvedPack=matrix([{ 'Número do pedido':'LU-1','Status pacote no momento que o relatório foi solicitado':status,'Modalidade de entrega':'Magalu entregas - Coleta' }]);
+  const approved=transformMagalu({orderHeaders:order.headers,orderRows:order.rows,packageHeaders:approvedPack.headers,packageRows:approvedPack.rows,channelName:'Box fan',taxRate:14},db,{'16000000000':'GA1219'});
+  assert.equal(approved.rows[0][5],status.trim(),'Preserva o estado original');
+  assert.equal(approved.rows[0][6],'Venda',status+' deve ser Venda');
+  assert.equal(approved.summary.cancelled,0);
+  assert.equal(approved.rows[0][18],0,'Pagamento aprovado não gera estorno');
+  assert.deepStrictEqual(approved.rows[0].slice(11),deliveredRow.slice(11),'Preserva receita, taxas, custo e margem de uma venda');
+}
 const cancelledPack=matrix([{ 'Número do pedido':'LU-1','Status pacote no momento que o relatório foi solicitado':'Pedido cancelado','Modalidade de entrega':'Magalu entregas - Coleta' }]);
 result=transformMagalu({orderHeaders:order.headers,orderRows:order.rows,packageHeaders:cancelledPack.headers,packageRows:cancelledPack.rows,channelName:'Box fan',taxRate:14},db,{'16000000000':'GA1219'});
 assert.equal(result.rows[0][6],'Cancelado');assert.equal(result.rows[0][16],0);assert.equal(result.rows[0][17],0);assert.equal(result.rows[0][18],-60.11);assert.equal(result.rows[0][19],0);assert.equal(result.rows[0][21],0);assert.equal(result.rows[0][22],0);
