@@ -74,7 +74,7 @@
     function blank(value) { return value == null || String(value).trim() === ''; }
     // Replica o Power Query/projeto-base: o Mercado Livre deixa estes dados na
     // linha seguinte em vendas agrupadas. Preenchemos para cima antes do rateio.
-    [ix.price, ix.units, ix.title, ix.ad, ix.sku].forEach(function (columnIndex) {
+    [ix.price, ix.units, ix.title, ix.ad].forEach(function (columnIndex) {
       var nextValue = '';
       for (var fillRow = rows.length - 1; fillRow >= 0; fillRow -= 1) {
         if (!blank(rows[fillRow][columnIndex])) nextValue = rows[fillRow][columnIndex];
@@ -119,7 +119,7 @@
         if(cancelled){fee=0;freight=0;rebate=0;discount=0;cancellation=cancellation||-faturamento;}
         if(returned){fee=0;rebate=0;discount=0;cancellation=cancellation||-faturamento;}
         var liquid = faturamento + fee + freight + rebate + discount + cancellation;
-        var tax = inactive?0:(-faturamento - discount) * (num(channel.taxRate) / 100), sku = String(r[ix.sku] || '').trim();
+        var tax = inactive?0:(-faturamento - discount) * (num(channel.taxRate) / 100), sku = String(r[ix.sku] || '').trim() || String(r[ix.ad] || '').trim();
         var cmv = inactive?0:-(costMap[sku] || 0) * units, gm = liquid + tax + cmv, date = selectedDate(r[ix.date], selectedMonth);
         if (!date) throw new Error('Data inválida na linha ' + item.line + '.');
         output.push(['Mercado Livre',channel.channelName,String(r[ix.sale] || '').replace(/\.0$/, ''),r[ix.date],date,r[ix.state],saleStatus,r[ix.delivery],r[ix.ad],title,sku,price,units,faturamento,discount,rebate,fee,freight,cancellation,liquid,0,tax,cmv,gm,faturamento ? gm / faturamento : 0,id]);
