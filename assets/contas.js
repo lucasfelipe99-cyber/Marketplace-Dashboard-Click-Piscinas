@@ -170,13 +170,17 @@
     if (!container) return;
     container.innerHTML = '<div class="accounts-shell"><div class="accounts-head"><div><h2>' + title +
       '</h2><p>Títulos em aberto alimentam a previsão; títulos baixados entram como realizados no Fluxo de Caixa e na DRE.</p></div>' +
-      '<div class="accounts-head-tools"><label>Empresa<select data-company-filter="' + type + '">' + companyOptions(companyFilters[type], true) + '</select></label><label class="accounts-upload">Importar planilha<input type="file" data-accounts-file="' + type + '" accept=".xlsx,.xls,.csv"></label><button class="accounts-clear-all" type="button" data-clear-all-accounts>Limpar todos os lançamentos</button></div></div>' +
+      '<div class="accounts-head-tools"><label>Empresa<select data-company-filter="' + type + '">' + companyOptions(companyFilters[type], true) + '</select></label>' +
+      (type === 'payable' ? '<button class="accounts-secondary" type="button" data-accounts-template>Baixar planilha modelo</button>' : '') +
+      '<label class="accounts-upload">Importar planilha<input type="file" data-accounts-file="' + type + '" accept=".xlsx,.xls,.csv"></label><button class="accounts-clear-all" type="button" data-clear-all-accounts>Limpar todos os lançamentos</button></div></div>' +
       '<section class="accounts-card"><h3>Novo título</h3>' + accountForm(type) + '</section>' +
       '<section class="accounts-card"><h3>Títulos cadastrados</h3>' + recordTable(type) + '</section></div>';
     bindAccountContainer(container, type);
   }
 
   function bindAccountContainer(container, type) {
+    var templateButton = container.querySelector('[data-accounts-template]');
+    if (templateButton) templateButton.addEventListener('click', downloadPayablesTemplate);
     var companyFilter = container.querySelector('[data-company-filter]');
     if (companyFilter) companyFilter.addEventListener('change', function () { companyFilters[type] = this.value; renderAccounts(type); });
     var clearAll = container.querySelector('[data-clear-all-accounts]');
@@ -276,6 +280,42 @@
     });
     var input = container.querySelector('[data-accounts-file]');
     input.addEventListener('change', function () { importFile(input.files[0], type, companyFilters[type]); input.value = ''; });
+  }
+
+  function downloadPayablesTemplate() {
+    try {
+      var headers = ['Descrição', 'Vencimento', 'Valor', 'Classificação', 'Categoria', 'Conta', 'Documento', 'Observações'];
+      var workbook = XLSX.utils.book_new();
+      var sheet = XLSX.utils.aoa_to_sheet([headers]);
+      sheet['!cols'] = [40, 18, 18, 26, 26, 26, 22, 50].map(function (width) { return { wch: width }; });
+      XLSX.utils.book_append_sheet(workbook, sheet, 'Contas a Pagar');
+      var instructions = [
+        ['MODELO DE IMPORTAÇÃO — CONTAS A PAGAR'],
+        ['Preencha a primeira aba, Contas a Pagar, a partir da linha 2. Mantenha os cabeçalhos e a ordem das abas.'],
+        ['Antes de importar, selecione a empresa na tela de Contas a Pagar. A empresa será aplicada a todas as linhas.'],
+        ['Cada linha representa um título em aberto. Para parcelas, informe uma linha por parcela, com seu valor e vencimento.'],
+        ['A competência será igual ao vencimento. Fornecedor e forma de pagamento não são preenchidos por esta importação.'],
+        [],
+        ['Campo', 'Preenchimento'],
+        ['Descrição', 'Obrigatório. Descrição do pagamento.'],
+        ['Vencimento', 'Obrigatório. Data no formato DD/MM/AAAA, por exemplo 30/09/2026.'],
+        ['Valor', 'Obrigatório. Valor maior que zero, por exemplo 1500,00.'],
+        ['Classificação', 'Opcional. Use uma classificação cadastrada nas Configurações Financeiras.'],
+        ['Categoria', 'Opcional. Use uma categoria vinculada à classificação escolhida.'],
+        ['Conta', 'Opcional. Nome do banco ou conta.'],
+        ['Documento', 'Opcional. Número da nota fiscal, boleto ou outro documento. Preserve zeros à esquerda como texto.'],
+        ['Observações', 'Opcional. Informações adicionais sobre o pagamento.'],
+        [],
+        ['EXEMPLO ILUSTRATIVO — esta aba não é importada'],
+        headers,
+        ['Pagamento de fornecedor', '30/09/2026', 1500, '', '', 'Conta principal', 'NF-001', 'Exemplo: preencha seus dados na primeira aba.']
+      ];
+      var guide = XLSX.utils.aoa_to_sheet(instructions);
+      guide['!cols'] = [42, 100, 18, 26, 26, 26, 22, 55].map(function (width) { return { wch: width }; });
+      guide['C19'].z = '#,##0.00';
+      XLSX.utils.book_append_sheet(workbook, guide, 'Instruções');
+      XLSX.writeFile(workbook, 'Modelo_Contas_a_Pagar.xlsx', { bookType: 'xlsx' });
+    } catch (error) { alert('Não foi possível baixar a planilha modelo: ' + error.message); }
   }
 
   async function importFile(file, type, companyId) {
