@@ -22,12 +22,12 @@
     var grouped={};history().forEach(function(item){var key=periodKey(item);if(!grouped[key])grouped[key]=Object.assign({},item,{rowCount:0});grouped[key].rowCount+=Number(item.rowCount||0);});
     var records=Object.values(grouped).sort(function(a,b){return Number(b.year)-Number(a.year)||Number(b.month)-Number(a.month);});
     var periodOptions='<option value="all" '+(state.period==='all'?'selected':'')+'>Todos os meses tratados</option>'+records.map(function(item){var key=periodKey(item);return '<option value="'+key+'" '+(key===state.period?'selected':'')+'>'+esc(periodLabel(item))+'</option>';}).join('');
-    return '<section class="treated-sales-hero"><div><span>Configuração · Vendas</span><h2>Base Tratada de Vendas</h2><p>Consulte, filtre e confira cada coluna gerada pelo Tratador de Vendas.</p></div></section>'+
+    return '<section class="treated-sales-hero"><div><span>Configuração · Vendas</span><h2>Base Tratada de Vendas</h2><p>Consulte, filtre e confira cada coluna gerada pelo Tratador de Vendas.</p></div>'+
+      '<button class="treated-sales-button primary" id="treatedSalesExport" type="button" title="Carregue a base para extrair todas as linhas filtradas em Excel" '+(state.loading||state.error||!filteredRows().length?'disabled':'')+'>Extrair base de vendas</button></section>'+
       '<section class="treated-sales-controls"><label class="treated-sales-field">Canal / empresa<select id="treatedSalesChannel">'+channelOptions+'</select></label>'+
       '<label class="treated-sales-field">Competência<select id="treatedSalesPeriod">'+periodOptions+'</select></label>'+
       '<label class="treated-sales-field search">Pesquisar em todas as colunas<input id="treatedSalesSearch" value="'+esc(state.search)+'" placeholder="Pedido, SKU, anúncio, produto..."></label>'+
       '<button class="treated-sales-button primary" id="treatedSalesLoad" type="button">'+(state.loading?'Carregando...':'Carregar base')+'</button>'+
-      '<button class="treated-sales-button" id="treatedSalesExport" type="button" '+(state.loading||state.error||!filteredRows().length?'disabled':'')+'>Extrair base de vendas</button>'+
       '<button class="treated-sales-button" id="treatedSalesClear" type="button">Limpar filtros</button></section>';
   }
   function tableHtml(){
