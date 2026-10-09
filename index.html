@@ -4869,6 +4869,10 @@
 
     <!-- Aba com a tabela completa criada pelo JavaScript. -->
     <section class="tab-panel active" id="dataPanel">
+      <section class="status-box" aria-label="Exportar base completa">
+        <button id="exportFullDatabase" class="primary" type="button">Extrair base completa — todos os meses</button>
+        <p id="exportFullDatabaseStatus" role="status">Um único Excel com uma aba por mês publicado, preservando os valores armazenados. Inclui todos os canais, independentemente dos filtros da tela.</p>
+      </section>
       <style>
         .database-rebuild-bar{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:10px 18px;align-items:center}.database-rebuild-bar>div:first-child{display:grid;gap:4px}.database-rebuild-bar>small{grid-column:1/-1}.database-action-menu{position:relative}.database-action-menu>summary{list-style:none;min-width:230px;padding:12px 18px;border:1px solid #4f8cff;border-radius:10px;background:#3478f6;color:#fff;font-weight:800;text-align:center;cursor:pointer}.database-action-menu>summary::-webkit-details-marker{display:none}.database-action-menu[open]>summary{border-radius:10px 10px 0 0}.database-action-options{position:absolute;z-index:50;right:0;width:min(430px,90vw);display:grid;gap:9px;padding:13px;border:1px solid var(--border-strong);border-radius:12px 0 12px 12px;background:var(--surface-strong);box-shadow:0 18px 42px rgba(0,0,0,.38)}.database-action-options button,.database-action-options select{width:100%;min-height:42px}.database-action-options label{display:grid;gap:5px;color:var(--text-soft);font-size:12px;font-weight:800}.database-action-options .danger{border-color:#ef476f;background:rgba(239,71,111,.12);color:#ff6b89}@media(max-width:760px){.database-rebuild-bar{grid-template-columns:1fr}.database-action-menu>summary{width:100%}.database-action-options{position:relative;width:auto}.database-rebuild-bar>small{grid-column:auto}}
       </style>
@@ -14424,6 +14428,7 @@
         .replaceAll("'", '&#039;');
     }
   </script>
+  <script src="/assets/export-full-database.js?v=1-20261009"></script>
   <script src="/assets/vendas-upload.js?v=24-20260828-rebuild-all"></script>
   <link rel="stylesheet" href="/assets/tratador-vendas.css?v=8-20260821-imposto-editavel">
   <script src="/assets/tratador-vendas.js?v=27-20260917-mlb-fallback"></script>
